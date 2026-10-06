@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 340">
+  <g transform="translate(30 0)">
+    <!-- dashboard -->
+    <path d="M-30 84 Q195 22 420 84 V340 H-30 Z" fill="#34353D"/>
+    <path d="M-30 84 Q195 22 420 84 V96 Q195 36 -30 96 Z" fill="#4A4B55"/>
+    <!-- instrument hood over the wheel -->
+    <path d="M70 92 Q195 30 320 92 V120 H70 Z" fill="#26272D"/>
+    <rect x="130" y="76" width="130" height="34" rx="12" fill="#3A3B44"/>
+    <!-- sun patch on the dash -->
+    <polygon points="250,64 330,84 400,120 330,120 270,92" fill="#FDF0DA" fill-opacity="0.12"/>
+    <!-- steering wheel -->
+    <path fill-rule="evenodd" fill="#26272D" d="M195 215m-128 0a128 128 0 1 0 256 0a128 128 0 1 0 -256 0ZM195 215m-100 0a100 100 0 1 1 200 0a100 100 0 1 1 -200 0Z"/>
+    <rect x="70" y="204" width="250" height="22" rx="11" fill="#26272D"/>
+    <rect x="184" y="215" width="22" height="120" rx="8" fill="#26272D"/>
+    <circle cx="195" cy="215" r="38" fill="#3A3B44"/>
+    <circle cx="195" cy="215" r="18" fill="#4A4B55"/>
+  </g>
+</svg>

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 510 844">
+  <g transform="translate(60 0)">
+    <!-- ring pinched at the fist, keys and fob hang below -->
+    <g transform="translate(228 466) scale(1.4)">
+      <g transform="rotate(-14)">
+        <rect x="-4" y="6" width="8" height="60" rx="3" fill="#B8BCC6"/>
+        <rect x="4" y="46" width="9" height="6" fill="#B8BCC6"/>
+        <rect x="4" y="58" width="9" height="6" fill="#B8BCC6"/>
+      </g>
+      <g transform="rotate(12)">
+        <rect x="-4" y="6" width="8" height="52" rx="3" fill="#8A8D96"/>
+        <rect x="-13" y="40" width="9" height="6" fill="#8A8D96"/>
+        <rect x="-13" y="50" width="9" height="6" fill="#8A8D96"/>
+      </g>
+      <rect x="-15" y="14" width="30" height="48" rx="10" fill="#B7A9C9"/>
+      <circle cx="0" cy="26" r="4" fill="#D6CBE0"/>
+      <path fill-rule="evenodd" fill="#B8BCC6" d="M-17 0a17 17 0 1 0 34 0a17 17 0 1 0 -34 0ZM-10 0a10 10 0 1 1 20 0a10 10 0 1 1 -20 0Z"/>
+    </g>
+  </g>
+</svg>

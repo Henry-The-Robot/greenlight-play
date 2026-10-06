@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 844">
+  <g transform="translate(30 0)">
+    <!-- roof header -->
+    <path d="M-30 -10 H420 V66 Q195 122 -30 66 Z" fill="#3A3B44"/>
+    <path d="M-30 -10 H420 V30 Q195 80 -30 30 Z" fill="#34353D"/>
+    <!-- A pillars -->
+    <polygon points="-30,40 46,64 -2,560 -30,560" fill="#3A3B44"/>
+    <polygon points="420,40 344,64 392,560 420,560" fill="#3A3B44"/>
+    <!-- rear-view mirror -->
+    <rect x="174" y="62" width="42" height="14" fill="#26272D"/>
+    <rect x="132" y="72" width="126" height="40" rx="14" fill="#26272D"/>
+    <rect x="140" y="78" width="110" height="28" rx="10" fill="#A9CBD9"/>
+    <polygon points="140,78 190,78 160,106 140,106" fill="#CFE6EE" fill-opacity="0.6"/>
+  </g>
+</svg>

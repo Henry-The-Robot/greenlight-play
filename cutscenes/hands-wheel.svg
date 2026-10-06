@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 300">
+  <!-- left hand at ten o'clock, right hand at two o'clock; arms run to the bottom corners -->
+  <g>
+    <line x1="84" y1="122" x2="-8" y2="300" stroke="#D6CBE0" stroke-width="54" stroke-linecap="round"/>
+    <line x1="84" y1="122" x2="60" y2="170" stroke="#B7A9C9" stroke-width="58" stroke-linecap="butt"/>
+    <ellipse cx="92" cy="104" rx="30" ry="25" fill="#E8B99A"/>
+    <rect x="66" y="88" width="42" height="12" rx="6" fill="#D39F80"/>
+    <rect x="66" y="102" width="42" height="12" rx="6" fill="#D39F80"/>
+    <rect x="70" y="116" width="36" height="11" rx="5.5" fill="#D39F80"/>
+    <ellipse cx="110" cy="84" rx="14" ry="8" transform="rotate(20 110 84)" fill="#E8B99A"/>
+  </g>
+  <g>
+    <line x1="306" y1="122" x2="398" y2="300" stroke="#D6CBE0" stroke-width="54" stroke-linecap="round"/>
+    <line x1="306" y1="122" x2="330" y2="170" stroke="#B7A9C9" stroke-width="58" stroke-linecap="butt"/>
+    <ellipse cx="298" cy="104" rx="30" ry="25" fill="#E8B99A"/>
+    <rect x="282" y="88" width="42" height="12" rx="6" fill="#D39F80"/>
+    <rect x="282" y="102" width="42" height="12" rx="6" fill="#D39F80"/>
+    <rect x="284" y="116" width="36" height="11" rx="5.5" fill="#D39F80"/>
+    <ellipse cx="280" cy="84" rx="14" ry="8" transform="rotate(-20 280 84)" fill="#E8B99A"/>
+  </g>
+</svg>

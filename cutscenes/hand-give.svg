@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 510 844">
+  <g transform="translate(60 0)">
+    <g transform="translate(250 430) rotate(-40)">
+      <!-- sleeve and cuff run toward the top-right -->
+      <rect x="52" y="-50" width="360" height="100" rx="26" fill="#C5D5BE"/>
+      <rect x="28" y="-56" width="30" height="112" rx="12" fill="#A9BDA2"/>
+      <!-- fist -->
+      <rect x="-40" y="-36" width="76" height="72" rx="24" fill="#B98264"/>
+      <rect x="-42" y="-30" width="24" height="17" rx="8.5" fill="#A06D51"/>
+      <rect x="-42" y="-10" width="24" height="17" rx="8.5" fill="#A06D51"/>
+      <rect x="-42" y="10" width="24" height="17" rx="8.5" fill="#A06D51"/>
+      <rect x="-26" y="-50" width="52" height="20" rx="10" fill="#A06D51"/>
+    </g>
+  </g>
+</svg>

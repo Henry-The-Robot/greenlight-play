@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 420">
+  <!-- passenger seat -->
+  <rect x="44" y="70" width="140" height="350" rx="30" fill="#B7A9C9"/>
+  <rect x="60" y="8" width="84" height="70" rx="24" fill="#B7A9C9"/>
+  <rect x="44" y="70" width="30" height="350" fill="#9F90B3"/>
+  <!-- a person seen from behind: hair, neck, shoulders, belt. No face. -->
+  <path d="M30 230 Q30 130 108 124 Q186 130 190 230 V420 H30 Z" fill="#A9BDA2"/>
+  <rect x="94" y="96" width="28" height="36" rx="10" fill="#B98264"/>
+  <circle cx="108" cy="64" r="34" fill="#4A3C36"/>
+  <polygon points="66,130 82,126 160,330 140,338" fill="#26272D"/>
+</svg>

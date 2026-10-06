@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 420">
+  <!-- the same seat, empty; the belt hangs loose from the shoulder -->
+  <rect x="44" y="70" width="140" height="350" rx="30" fill="#B7A9C9"/>
+  <rect x="60" y="8" width="84" height="70" rx="24" fill="#B7A9C9"/>
+  <rect x="44" y="70" width="30" height="350" fill="#9F90B3"/>
+  <rect x="60" y="76" width="84" height="8" fill="#9F90B3"/>
+  <polygon points="66,48 90,48 120,300 98,310" fill="#4A4B55"/>
+  <rect x="94" y="296" width="30" height="22" rx="5" fill="#8A8D96"/>
+</svg>

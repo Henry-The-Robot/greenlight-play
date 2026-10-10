@@ -24,20 +24,27 @@ canvas{display:block;touch-action:none;outline:none}
  (4) the answer-gate quiz-runner pattern (answers sit in the lanes);
  (5) teach-then-test with spaced re-asks (Roediger and Karpicke 2006, testing effect); every rule is asked twice, the re-ask in new words. The route is fixed per day, so it does not adapt to misses.
  (6) share-card squares after Wordle; seeded daily route so times compare (BRIEF.md "Kyle's spec, part 2").
- Rules (bank/facts.json ids, own words; the id is also in RULES[].id): bus s7_p11_roadway-002, 4-way stop s6_p11_roadway-001 + -002,
- crosswalk s6_p11_roadway-032, yellow s6_p11_roadway-009, siren s6_p11_run2-008, flagger s7_p11_run2-021, cyclist s8c-010,
- curb colors s6_p11_run3-017 (red) + s6_p11_run3-008 (white). Adult-trap list (hard:1) is Kyle's, not measured.
- Daily route = same 6 rules, order, re-asks and answer wording for everyone on a local calendar date (like Wordle); the answer LANES are shuffled on every attempt.
+ Rules (RH2): 17 teaching units (game/src/content/units.json ids, also RULES[].id) in the RUSH_UNITS block below, with 60 bank questions; nothing is hand-written in this file.
+ Adult-trap families (hard) are Kyle's list (curb, cyclist, 4-way), not measured.
+ Daily route = same 6 rules, order, questions and answer wording for everyone on a local calendar date (like Wordle); the answer LANES are shuffled on every attempt.
  Test hooks exist ONLY with ?dev=1: ts=4 (clock x4), seed=N (route seed, default = date as YYYYMMDD), window.__rush (state for the Playwright bot). Players never see them.
  V2 (card RH1, Kyle 2026-10-10: "too fast to read the info", "give it music and sound effects", "a better learning experience"), prototypes/DESIGN.md:
  (7) pace: teach card waits for a tap (6 s max) while the road crawls; question line 1.5 s before the signs; signs of 2-5 words with the full answer in a bottom bar;
      windows 7 s / 5 s / 4 s (first / second / third ask), fast window = first 40 percent; Calm doubles every window.
  (8) learning: teach card = rule + picture + one "why" line; a miss stops the road and keeps rule + why until a tap (delayed feedback after a retrieval attempt,
      Butler, Karpicke and Roediger 2007); right re-ask = "Locked in"; end card lists rules learned and rules to practise (prototypes/TEACHING.md sections 2-4);
-     every answer set holds a cautious-but-wrong option, so picking the safest-sounding words fails.
+     v2 wrote a cautious-but-wrong option into every answer set by hand; RH2 takes the 2 wrong options per question from the bank (chosen in tools/rush-labels.json) and measures the cheap-bot tells.
  (9) audio, no files, ported from the slice (game/src/audio/engine.ts + schedule.ts): audio-clock look-ahead scheduler (Chris Wilson, "A Tale of Two Clocks"),
      per-stem low-pass, anchored note envelopes, dark noise reverb, iOS audioSession, resume on first tap. New here: kick/hat and lead layers by streak, a riser at turbo,
      a low-pass on the music while a card is open, and the sound effects. */
+/* V3 (card RH2b, Kyle played v2 on 2026-10-10: "basically the whole game is just questions and cards with minimal playing", "not enough time to read", "text too small", "SFX are good"),
+ prototypes/DESIGN.md "v3: play first". About 3 of 4 moments are PLAYED (swipe = lane, hold = brake, release = go; no question text, no signs; the world judges the car), 1 of 4 is a question (the road crawls, the
+ clock starts after a reading delay of 0.3 s a word, no turbo). Coins win: each level has a coin target; wrong = lose coins, a dangerous wrong = a crash = a life (3 lives). Levels add rule families, speed (+2 m/s) and shorter
+ timers (x0.9). A placeholder 15 s ad sits between levels and on game over (extra life once). Sources and what is ours:
+ (10) controls: swipe = one lane is the Subway Surfers / Temple Run model (item 1 above); hold = brake is our own addition, no exemplar copied (the judge numbers, 15 m/s2 braking and the 3 m late margin, are tuned by test, not measured);
+ (11) lives, a coin target per level, a rewarded-ad continue once per run, a coming-soon mini game: Kyle's spec (DESIGN.md "v3: play first"), shape of a casual mobile runner;
+ (12) the fixed-step loop, the audio synth, the world drawing and the RH2 data block are unchanged from v2 (rh2.html is the v2/RH2 file, kept).
+ Judges (stepStop, stepAmb, stepBike, stepNoStop, stepPark in the logic block) are written out in the comment above K_STOP. Test: check.js (bots drive the real pointer handlers). */
 const W=390,CX=195,HOR=240,Z1=40,SF=.28,PX=34,LN=3.2,DT=1/60,GAP=30,TEACH_MAX=6,TEACH_MIN=.7,PRE=1.5,FW=.4,CRAWL=2.5,VQ=15;
 let H=844,GY=700,ZN=-9.5;   /* ZN: the nearest ground distance that still reaches the bottom edge of the canvas */   /* logical height: 664 to 844, set by resize() from the window shape, so a phone browser with a toolbar still draws at full width and size */
 const Q=new URLSearchParams(location.search);
@@ -80,132 +87,43 @@ function RR(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r)
 function wrapT(s,mw,sz){cx.font=`bold ${sz}px ${FONT}`;const L=[];let l='';
  for(const w of s.split(' ')){const n=l?l+' '+w:w;if(cx.measureText(n).width>mw&&l){L.push(l);l=w}else l=n}if(l)L.push(l);return L}
 const mu=n=>1+.5*(Math.min(Math.max(n,1),7)-1);
-const qr=(t,q)=>clamp((t-.3)/(q.W-.3),0,1);  /* speed ratio 0..1: the clock starts when the signs have landed (0.3 s) */
+const qr=(t,q)=>clamp((t-q.rd)/q.W,0,1);  /* answer-speed ratio 0..1: the clock starts after the reading delay q.rd (v3) */
 
-/* ---------- content: 8 rules, 2 variants each (variant 0 = first ask, variant 1 = re-ask, new words) ---------- */
-/* v[i] = {q: the scene question, a: [right answer, cautious-but-wrong, plain wrong]}; each answer = {s: sign text 2-5 words, t: full text for the bottom bar}.
-   Our own words (not handbook wording). Every right answer was checked against the fact text in bank/facts.json (ids below); every wrong answer is wrong in the scene shown.
-   The cautious-but-wrong option sounds safe (stop, wait, stay) but breaks the rule, so "pick the safest words" loses. The right answer is sometimes the most cautious
-   wording, sometimes the middle, sometimes the least (tune.js counts), and rights use "X, then Y" and "if it is safe" endings as often as wrongs do, so no single
-   pattern gives the answer away. */
-const RULES=[
-{k:'bus',id:'s7_p11_roadway-002',title:'SCHOOL BUS',fail:'ticket',name:'School bus',
- teach:'Red lights flash on a school bus? Stop. Wait until they go off.',
- why:'Kids may cross in front of the bus.',short:'School bus red lights: stay stopped.',
- v:[{q:'School bus ahead, red lights flashing. You?',a:[
-   {s:'Stay put',t:'Stay put till the flashing ends, then go'},
-   {s:'Stop, then ease past',t:'Stop and wait 10 seconds, then ease past'},
-   {s:'Slow down, pass left',t:'Slow down and pass on the left'}]},
-  {q:'Bus stopped, red lights flashing, kids stepping off. You?',a:[
-   {s:'Stay stopped',t:'Stay stopped until the lights are off'},
-   {s:'Wait, then ease past',t:'Wait a moment, then ease past slowly'},
-   {s:'Speed up and pass',t:'Speed up and pass before the kids cross'}]}]},
-{k:'4way',id:'s6_p11_roadway-001 + s6_p11_roadway-002',title:'4-WAY STOP',fail:'crash',name:'4-way stop',hard:1,
- roast:"You'd cause a pile-up at the 4-way stop.",
- teach:'At a 4-way stop, first to stop goes first. A tie? The car on your right goes.',
- why:'One order for every driver means no guessing.',short:'4-way stop: first to stop goes. Tie: right goes.',
- v:[{q:'You and a car on your right arrive together. Who goes first?',a:[
-   {s:'The car on your right',t:'The driver on your right has right of way'},
-   {s:'The bigger car',t:'The bigger car goes first, as it is harder to stop'},
-   {s:'Whoever waits longer',t:'Whoever has been waiting longer goes first'}]},
-  {q:'A car on your left stopped before you. Who goes first?',a:[
-   {s:'Whoever stopped earlier',t:'The driver who stopped earlier'},
-   {s:'Whoever is on the right',t:'Whoever is on your right, to stay safe'},
-   {s:'The faster car',t:'The faster car goes first'}]}]},
-{k:'cross',id:'s6_p11_roadway-032',title:'CROSSWALK',fail:'ticket',name:'Crosswalk',
- teach:'A person in a crosswalk, marked or not? Yield. Let them cross first.',
- why:'A person on foot has no metal around them.',short:'Crosswalk, marked or not: yield to people.',
- v:[{q:'A person walks across the stripes. You?',a:[
-   {s:'Wait for them',t:'Wait for them to finish crossing'},
-   {s:'Slow down, edge past',t:'Slow down, stay in your lane, and edge past them'},
-   {s:'Honk and drive past',t:'Honk and drive past them'}]},
-  {q:'A person steps off the corner at a junction. No stripes. You?',a:[
-   {s:'Yield, stripes or not',t:'Yield. A corner counts without stripes'},
-   {s:'Stop, but only at stripes',t:'Stop, stay put, and wait, but only at stripes'},
-   {s:'Go. No stripes here',t:'Go on. There are no stripes here'}]}]},
-{k:'yellow',id:'s6_p11_roadway-009',title:'YELLOW LIGHT',fail:'crash',name:'Yellow light',
- teach:'Yellow means red comes next. Stop before the line if you can stop safely.',
- why:'Cross traffic is about to get its green.',short:'Yellow: red is next. Stop if you safely can.',
- v:[{q:'The light turns yellow. The white line is ahead. You?',a:[
-   {s:'Stop before the line',t:'Stop at the line, if it is safe'},
-   {s:'Stop past the line',t:'Slow down first, then stop past the line'},
-   {s:'Speed up, beat red',t:'Speed up and beat the red light'}]},
-  {q:'Yellow light, and you are far from the line. You?',a:[
-   {s:'Brake, then stop',t:'Brake early, then stop at the line'},
-   {s:'Stop on the crosswalk',t:'Stop on the crosswalk and stay put there'},
-   {s:'Go. Yellow means go',t:'Go on. Yellow means keep going'}]}]},
-{k:'amb',id:'s6_p11_run2-008',title:'SIREN BEHIND',fail:'ticket',name:'Siren behind you',
- teach:'Siren and lights behind you? Pull to the right edge and stop.',
- why:'A clear right edge lets the crew drive past fast.',short:'Siren behind you: pull right and stop.',
- v:[{q:'An ambulance with a siren is behind you. You?',a:[
-   {s:'Pull right and stop',t:'Slow down, ease right and stop'},
-   {s:'Stop where you are',t:'Stop right where you are, and just wait'},
-   {s:'Speed up, clear the road',t:'Speed up to get out of its way'}]},
-  {q:'A police car with lights is behind you. You are in the middle lane. You?',a:[
-   {s:'Move right and stop',t:'Move to the right, stop, and let it pass'},
-   {s:'Pull left and stop',t:'Pull left, stop, and wait for it to pass'},
-   {s:'Stay in your lane',t:'Stay in your lane, stop, and let it pass'}]}]},
-{k:'flag',id:'s7_p11_run2-021',title:'FLAGGER',fail:'ticket',name:'Flagger',
- teach:'A flagger in a work zone? Obey the flagger like a traffic light.',
- why:'The flagger sees the whole work zone. You see one lane.',short:'Work zone: obey the flagger like a light.',
- v:[{q:'A flagger holds up a STOP sign. You?',a:[
-   {s:'Obey the sign',t:'Obey the sign till the flagger waves you on'},
-   {s:'Stop, then go if safe',t:'Stop, look, then go once the work zone looks safe'},
-   {s:'Wait, then drive on',t:'Stop, wait till the road is clear, then drive on'}]},
-  {q:'A flagger holds up a STOP sign and looks at you. You?',a:[
-   {s:'Wait for the wave',t:'Wait until the flagger waves you on, then go'},
-   {s:'Wait, then go if clear',t:'Wait until the road looks safe to you, then go'},
-   {s:'Slow down and drive on',t:'Slow down and drive on through'}]}]},
-{k:'bike',id:'s8c-010',title:'CYCLIST',fail:'ticket',name:'Cyclist',hard:1,
- roast:"You'd pass a cyclist with no room to spare.",
- teach:'Passing a cyclist? Leave at least 3 feet of space.',
- why:'A rider can wobble. Space gives them time.',short:'Passing a cyclist: leave 3 feet or more.',
- v:[{q:'A cyclist rides ahead in your lane. You pass. You?',a:[
-   {s:'Give 3 feet or more',t:'Give them 3 feet or more, to be safe'},
-   {s:'Slow down, 2 feet away',t:'Slow down and pass them about 2 feet away'},
-   {s:'Pass fast and close',t:'Pass fast and close to save time'}]},
-  {q:'You come up behind the same cyclist. You?',a:[
-   {s:'Slow, pass with 3 feet',t:'Slow down, then pass with 3 feet or more'},
-   {s:'Slow down, leave 2 feet',t:'Slow right down, then leave about 2 feet of room'},
-   {s:'Wait, then pass close',t:'Wait behind them, then pass with 1 foot'}]}]},
-{k:'curb',id:'s6_p11_run3-017 + s6_p11_run3-008',title:'CURB COLORS',fail:'ticket',name:'Curb colors',hard:1,
- roast:"You'd park at the red curb and get towed.",
- teach:'Red curb: never stop. White curb: stop only to pick up or drop off people.',
- why:'Red keeps the way clear for crews. White keeps a drop-off spot free.',short:'Red curb: never stop. White: drop-off only.',
- v:[{q:'A red curb ahead. You want to drop off a friend. You?',a:[
-   {s:'Keep going',t:'Keep going. Red means no stopping'},
-   {s:'Stop, stay in the car',t:'Stop briefly, but stay in the car'},
-   {s:'Park here, it is quick',t:'Park here for a minute, then leave'}]},
-  {q:'A white curb ahead. Your friend needs to get out. You?',a:[
-   {s:'Pull in, drop off',t:'Pull in just to drop off your friend'},
-   {s:'Drop off, then park',t:'Drop off, then stay parked and wait there'},
-   {s:'Park for ten minutes',t:'Park here for ten minutes'}]}],
- roasts:["You'd park at the red curb and get towed.","You'd park at the white curb and block the drop-off."]}
-];
-RULES.forEach(r=>{r.roast=r.roast||"You'd lose your license at the "+r.name.toLowerCase()+"."});
-RULES[0].roast="You'd lose your license at the school bus.";RULES[3].roast="You'd go through a yellow you could stop for.";
-RULES[4].roast="You'd block the ambulance.";RULES[4].roasts=["You'd block the ambulance.","You'd block the police car."];RULES[5].roast="You'd lose to a person holding a sign.";
-const RI={};RULES.forEach((r,i)=>RI[r.k]=i);
+/* ---------- content: teaching units (card RH2) ---------- */
+/* Every moment reads its teach line, why line, question and answers from RUSH_UNITS. The block between the markers is written by
+   tools/build_rush_units.py from game/src/content/units.json + the bank questions + tools/rush-labels.json. Do not edit it by hand.
+   unit = {id (units.json), k (scene kind), cv (curb colour), sv (scene variant), hard, title, name, fail, teach, why, short, roast, qs[]};
+   question = {id (bank), tier t1|t2|t3, stem (the scene question, bank wording), ci (bank correct index), sv?, o: [right, wrong, wrong]};
+   option = {i (bank option index), s (sign label, 2-5 words), t (the full bank option, shown in the bottom bar)}.
+   Sign = label, bottom bar = full option. The first ask of a rule uses a t1 question, the re-ask a t2 or t3 question (different wording). */
+/*RUSH-UNITS-BEGIN*/
+const RUSH_UNITS=[{"id":"s7_p11_roadway-002","k":"bus","cv":null,"sv":0,"hard":false,"title":"SCHOOL BUS","name":"School bus","fail":"ticket","teach":"Stop for school bus red flashing lights until they go off, unless the bus is across a divided road.","why":"Kids may cross in front of the bus.","action":{"correct":"stop_full","wrong_crash":"keep_going","cite":"Stop for school bus red flashing lights until they go off, unless the bus is across a divided road."},"short":"School bus red lights: stay stopped.","roast":"You'd lose your license at the school bus.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road-cont/","qs":[{"id":"q-3-043","tier":"t1","stem":"A school bus on an undivided road has its red lights flashing. Who must stop?","ci":1,"o":[{"i":1,"s":"Cars from both directions","t":"Cars from both directions, behind and ahead"},{"i":0,"s":"Cars behind, not oncoming","t":"Cars behind the bus, but not oncoming cars"},{"i":2,"s":"Cars facing it, not behind","t":"Cars facing the bus, but not those behind it"}]},{"id":"q-3-045","tier":"t2","stem":"A bus ahead on a two-lane road shows red flashing lights. An oncoming car drives past it. Which statement is right?","ci":0,"o":[{"i":0,"s":"Oncoming driver broke the rule","t":"The oncoming driver broke the rule, since both directions must stop"},{"i":1,"s":"Fine; only followers must stop","t":"The oncoming driver is fine, since only following traffic must stop"},{"i":3,"s":"Fine if no child visible","t":"The oncoming driver is fine if no child is in sight"}]}]},{"id":"s6_p11_run2-001","k":"bus","cv":null,"sv":0,"hard":false,"title":"BUS STOP ARM","name":"School bus stop arm","fail":"ticket","teach":"When a school bus stop arm extends, stop and stay stopped until the children are clear.","why":"The stop arm means children are crossing.","action":{"correct":"stop_full","wrong_crash":"keep_going","cite":"When a school bus stop arm extends, stop and stay stopped until the children are clear."},"short":"Stop arm out: stay stopped.","roast":"You'd drive past a school bus stop arm.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road-cont/","qs":[{"id":"q-3-022","tier":"t1","stem":"What does a school bus stop arm do?","ci":0,"o":[{"i":0,"s":"Makes traffic stop","t":"It makes traffic stop while children board or leave"},{"i":1,"s":"Bus pulling away soon","t":"It shows the bus will pull away from the stop soon"},{"i":2,"s":"Bus turning right soon","t":"It signals that the bus is turning right shortly"}]},{"id":"q-3-023","tier":"t2","stem":"You are stopped behind a school bus whose stop arm is out. A child steps off the curb to cross. When may you drive on?","ci":3,"o":[{"i":3,"s":"Arm folds, children clear","t":"When the arm folds in and the children are clear"},{"i":0,"s":"Arm out, road looks empty","t":"When the arm is out but the road looks empty"},{"i":1,"s":"Once first child is across","t":"As soon as the first child is across"}]}]},{"id":"s7_p11_run3-009","k":"bus","cv":null,"sv":0,"hard":false,"title":"KIDS AT THE BUS","name":"Children at a bus","fail":"ticket","teach":"Expect children to cross in front of a stopped school bus, and stay stopped until they are clear.","why":"The driver can see kids in front of the bus.","action":{"correct":"stop_full","wrong_crash":"keep_going","cite":"Expect children to cross in front of a stopped school bus, and stay stopped until they are clear."},"short":"Kids cross in front of the bus: stay stopped.","roast":"You'd watch the wrong side of the school bus.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road-cont/","qs":[{"id":"q-3-097","tier":"t1","stem":"Why are children taught to cross in front of a stopped school bus?","ci":0,"o":[{"i":0,"s":"Driver can see them","t":"So the bus driver can see them"},{"i":1,"s":"Stay clear of exhaust","t":"So they stay clear of the exhaust"},{"i":2,"s":"They cross faster","t":"So they cross faster"}]},{"id":"q-3-058","tier":"t1","stem":"After leaving a stopped school bus, where do children who must cross the road walk?","ci":2,"o":[{"i":2,"s":"In front, driver's view","t":"In front of the bus, in the driver's view"},{"i":0,"s":"Behind it, out of traffic","t":"Behind the bus, out of the traffic lane"},{"i":1,"s":"Beside it, next to traffic","t":"At the side of the bus, next to the traffic"}]},{"id":"q-3-098","tier":"t2","stem":"You are stopped behind a bus with red lights. You cannot see the front of the bus. What should you assume?","ci":2,"o":[{"i":2,"s":"Kids may cross in front","t":"Children may cross in front of the bus, out of view"},{"i":0,"s":"Kids walking behind the bus","t":"Children are walking behind the bus toward you"},{"i":1,"s":"No one will cross","t":"No one will cross, since the bus is loading"}]},{"id":"q-3-099","tier":"t2","stem":"Which statement about children crossing at a stopped bus is right?","ci":1,"o":[{"i":1,"s":"In front, driver sees them","t":"They cross in front, where the driver can see them"},{"i":0,"s":"Behind it, cars see them","t":"They cross behind it, where cars can see them"},{"i":2,"s":"Beside it, in traffic","t":"They cross beside it, between the bus and traffic"}]}]},{"id":"s6_p11_roadway-032","k":"cross","cv":null,"sv":0,"hard":false,"title":"CROSSWALK","name":"Crosswalk","fail":"ticket","teach":"Give way to people in any marked crosswalk, and in an unmarked crosswalk at an intersection.","why":"A person on foot has no metal around them.","action":{"correct":"stop_full","wrong_crash":"keep_going","cite":"Give way to people in any marked crosswalk, and in an unmarked crosswalk at an intersection."},"short":"Crosswalk, marked or not: yield to people.","roast":"You'd lose your license at the crosswalk.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road/","qs":[{"id":"q-2a-103","tier":"t1","stem":"Which crosswalks give pedestrians the right of way?","ci":1,"o":[{"i":1,"s":"Marked and unmarked alike","t":"Marked and unmarked crosswalks alike"},{"i":2,"s":"Signal and school crosswalks","t":"Signal-controlled crosswalks and school crosswalks"},{"i":3,"s":"25 mph streets or lower","t":"Crosswalks on streets with a 25 mph limit or lower"}],"sv":0},{"id":"q-1b-016","tier":"t1","stem":"At an intersection with no painted crosswalk, a person steps off the curb. Who has the right of way?","ci":0,"o":[{"i":0,"s":"The pedestrian","t":"The pedestrian, as at a painted crosswalk"},{"i":1,"s":"First one to the corner","t":"Whoever is first to the corner"},{"i":3,"s":"The larger vehicle","t":"The larger vehicle"}],"sv":1},{"id":"q-2a-105","tier":"t2","stem":"A friend says only painted crosswalks protect pedestrians. How do you reply?","ci":1,"o":[{"i":1,"s":"Unmarked ones protect too","t":"Unmarked crosswalks protect pedestrians too"},{"i":0,"s":"Agree; paint creates priority","t":"Agree; paint is what creates the right of way"},{"i":3,"s":"Pedestrians have priority everywhere","t":"Pedestrians have the right of way everywhere on the road"}],"sv":0}]},{"id":"s6_p11_roadway-009","k":"yellow","cv":null,"sv":0,"hard":false,"title":"YELLOW LIGHT","name":"Yellow light","fail":"crash","teach":"Steady yellow means red is next. Stop if you can do so safely.","why":"Cross traffic is about to get its green.","action":{"correct":"stop_line","wrong_crash":"keep_going","cite":"Steady yellow means red is next. Stop if you can do so safely."},"short":"Yellow: red is next. Stop if you safely can.","roast":"You'd go through a yellow you could stop for.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road/","qs":[{"id":"q-2a-052","tier":"t1","stem":"You are far back from an intersection when the light turns yellow. What do you do?","ci":0,"o":[{"i":0,"s":"Brake smoothly, stop at line","t":"Brake smoothly and stop before the line, since you have room"},{"i":1,"s":"Accelerate; yellow means hurry","t":"Accelerate to make it, since yellow means hurry"},{"i":2,"s":"Brake hard, even over line","t":"Brake hard, even if you stop over the line, as red is next"}]},{"id":"q-2a-053","tier":"t2","stem":"You drive at 35 mph and reach the limit line just as the light turns yellow. A car follows close behind. What fits the yellow-light rule?","ci":0,"o":[{"i":0,"s":"Cross with care if clear","t":"Cross with care, if you judge you can clear the crossing before red"},{"i":1,"s":"Slam on brakes, always stop","t":"Slam on the brakes, since yellow always means stop"},{"i":2,"s":"Accelerate to beat red","t":"Accelerate hard so you are sure to be through before red"}],"keep":true}]},{"id":"s6_p11_run2-008","k":"amb","cv":null,"sv":0,"hard":false,"title":"SIREN BEHIND","name":"Siren behind you","fail":"ticket","teach":"Emergency vehicle with siren and lights approaching: pull to the right, clear of intersections, and stop until it passes.","why":"A clear right edge lets the crew drive past fast.","action":{"correct":"pull_right_stop","wrong_crash":"keep_going","cite":"Emergency vehicle with siren and lights approaching: pull to the right, clear of intersections, and stop until it passes."},"short":"Siren behind you: pull right and stop.","roast":"You'd block the ambulance.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road/","qs":[{"id":"q-6-166","tier":"t1","stem":"What must you do when an emergency vehicle with a siren and lights approaches?","ci":2,"o":[{"i":2,"s":"Pull right and stop","t":"Pull to the right edge and stop until it passes"},{"i":0,"s":"Slow, keep rolling in lane","t":"Slow down but keep rolling in your lane until it passes"},{"i":1,"s":"Pull left and stop","t":"Pull to the left edge and stop until it passes"}]},{"id":"q-6-168","tier":"t2","stem":"Which driver is doing the right thing as a siren approaches?","ci":0,"o":[{"i":0,"s":"Ben pulls right, stays stopped","t":"Ben, who pulls right and stays stopped until the truck has passed"},{"i":1,"s":"Ana slows, stays in lane","t":"Ana, who slows to about 10 mph but stays in her own lane until it passes"},{"i":2,"s":"Cy pulls left, waits","t":"Cy, who pulls left to the median and waits"}]},{"id":"q-6-157","tier":"t2","stem":"An emergency vehicle with flashing lights and a siren approaches from behind. What do you do?","ci":3,"o":[{"i":3,"s":"Pull right, clear intersection","t":"Pull to the right edge of the road, clear of any intersection"},{"i":1,"s":"Stop in your lane","t":"Stop where you are in your lane until the vehicle goes by"},{"i":2,"s":"Pull left, clear intersection","t":"Pull to the left edge of the road, well clear of any intersection"}]},{"id":"q-6-158","tier":"t2","stem":"You are in the middle of an intersection when you hear a siren behind you. What do you do?","ci":3,"o":[{"i":3,"s":"Clear it, then pull right","t":"Clear the intersection first, then pull to the right edge"},{"i":0,"s":"Stop right where you are","t":"Stop right where you are in the intersection"},{"i":2,"s":"Wait for light to change","t":"Wait for the light to change before moving"}]}]},{"id":"s7_p11_run2-021","k":"flag","cv":null,"sv":0,"hard":false,"title":"FLAGGER","name":"Flagger","fail":"ticket","teach":"In a work zone, obey the flagger. Disobeying a person who directs traffic is unlawful.","why":"The flagger sees the whole work zone. You see one lane.","action":{"correct":"stop_full","wrong_crash":"keep_going","cite":"In a work zone, obey the flagger. Disobeying a person who directs traffic is unlawful."},"short":"Work zone: obey the flagger.","roast":"You'd lose to a person holding a sign.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road-cont2/","qs":[{"id":"q-5b-013","tier":"t1","stem":"A flagger in a work zone signals you. What must you do?","ci":1,"o":[{"i":1,"s":"Obey like a traffic light","t":"Obey it the way you obey a traffic light"},{"i":0,"s":"Treat it as a suggestion","t":"Treat it as a suggestion and use your own judgment"},{"i":3,"s":"Signs outrank a person","t":"Follow the posted signs, since they outrank a person"}]},{"id":"q-5b-014","tier":"t2","stem":"Approaching a road crew, you see a flagger hold up a STOP paddle, yet the road ahead looks empty. What do you do?","ci":3,"o":[{"i":3,"s":"Stop and wait for flagger","t":"Stop and wait until the flagger lets you go"},{"i":0,"s":"Roll through, lane is clear","t":"Roll through slowly since the lane is clear"},{"i":1,"s":"Stop only if cars oncoming","t":"Stop only if cars are coming the other way"}]}]},{"id":"s6_p11_run3-001","k":"hydrant","cv":null,"sv":0,"hard":false,"title":"FIRE HYDRANT","name":"Fire hydrant","fail":"ticket","teach":"Never park within 15 feet of a fire hydrant to keep it accessible in emergencies.","why":"Crews must reach the hydrant fast in an emergency.","action":{"correct":"no_stop_here","wrong_crash":"stop_full","cite":"Never park within 15 feet of a fire hydrant to keep it accessible in emergencies."},"short":"Hydrant: park 15 feet away or more.","roast":"You'd park by a fire hydrant and get a ticket.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/navigating-the-roads-cont1/","qs":[{"id":"q-1b-010","tier":"t1","stem":"What is the closest you may leave your car to a fire hydrant?","ci":2,"o":[{"i":2,"s":"15 feet away","t":"15 feet away"},{"i":0,"s":"10 feet away","t":"10 feet away"},{"i":1,"s":"20 feet away","t":"20 feet away"}]},{"id":"q-2a-061","tier":"t1","stem":"How near to a fire hydrant may you park?","ci":1,"o":[{"i":1,"s":"No closer than 15 feet","t":"No closer than 15 feet"},{"i":0,"s":"No closer than 5 feet","t":"No closer than 5 feet"},{"i":2,"s":"No closer than 3 feet","t":"No closer than 3 feet"}]},{"id":"q-2a-062","tier":"t2","stem":"A curb has no paint. A hydrant stands there, and you plan to park 10 feet from it. What is right?","ci":3,"o":[{"i":3,"s":"Move back, 15 feet minimum","t":"Move back, since you must be at least 15 feet away"},{"i":0,"s":"Go ahead; only red no-parking","t":"Go ahead, since only a red curb is a no-parking curb"},{"i":2,"s":"Move back, needs 20 feet","t":"Move back, since the rule needs 20 feet from a hydrant"}]}]},{"id":"s6_p11_roadway-001","k":"4way","cv":null,"sv":0,"hard":true,"title":"4-WAY STOP","name":"4-way stop","fail":"crash","teach":"At a four-way stop, the vehicle that arrives and stops first has the right-of-way.","why":"One order for every driver means no guessing.","action":{"correct":"wait_turn","wrong_crash":"keep_going","cite":"At a four-way stop, the vehicle that arrives and stops first has the right-of-way."},"short":"4-way stop: first to stop goes first.","roast":"You'd cause a pile-up at the 4-way stop.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road/","qs":[{"id":"q-2a-028","tier":"t1","stem":"At a four-way stop, which vehicle has the right to go first?","ci":1,"o":[{"i":1,"s":"First vehicle to stop","t":"The vehicle that stopped first"},{"i":0,"s":"Right-hand car, any order","t":"The vehicle on your right, whatever the order"},{"i":2,"s":"The one going straight","t":"The vehicle that is going straight"}],"sv":0},{"id":"q-2a-029","tier":"t2","stem":"You stop at a four-way stop. A moment later a car on the cross street stops on your right. Nobody else is there. Who goes first?","ci":1,"o":[{"i":1,"s":"You, stopped first","t":"You do, since you stopped first"},{"i":0,"s":"Other car, on your right","t":"The other car, since it is on your right"},{"i":2,"s":"Whoever moves first","t":"Whoever starts to move first"}],"sv":0},{"id":"q-2a-030","tier":"t2","stem":"Which pair of rules is right for a four-way stop?","ci":1,"o":[{"i":1,"s":"First goes; tie, left yields","t":"The first car to stop goes first; in a tie the left car yields to the right"},{"i":0,"s":"Right always first, even later","t":"The car on the right always goes first, even if it came later"},{"i":3,"s":"First goes; tie, right yields","t":"The first car to stop goes first; in a tie the right car yields to the left"}]}]},{"id":"s6_p11_roadway-002","k":"4way","cv":null,"sv":0,"hard":true,"title":"4-WAY STOP TIE","name":"4-way stop tie","fail":"crash","teach":"Two drivers arrive together at a four-way stop: the driver on the left yields to the right.","why":"Everyone knows who goes next, so nobody guesses.","action":{"correct":"wait_turn","wrong_crash":"keep_going","cite":"Two drivers arrive together at a four-way stop: the driver on the left yields to the right."},"short":"4-way stop tie: the car on the right goes.","roast":"You'd cause a pile-up at the 4-way stop.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road/","qs":[{"id":"q-2a-031","tier":"t1","stem":"Two cars on adjacent roads stop at a four-way stop at the very same moment. Which one must wait?","ci":2,"o":[{"i":2,"s":"The one on the left","t":"The one on the left"},{"i":0,"s":"The one on the right","t":"The one on the right"},{"i":1,"s":"The larger vehicle","t":"The one driving the larger vehicle"}],"sv":0},{"id":"q-2a-032","tier":"t2","stem":"You head north and reach a four-way stop at the same moment as a car coming from the east, on your right. Who goes first?","ci":3,"o":[{"i":3,"s":"The car on your right","t":"The car from the east, on your right"},{"i":0,"s":"You, heading north","t":"You, since you are heading north"},{"i":1,"s":"You, going straight, not turning","t":"You, since you are going straight and not turning"}],"sv":0},{"id":"q-2a-033","tier":"t2","stem":"You head south and reach a four-way stop at the same moment as a car from the east, on your left. Who goes first?","ci":0,"o":[{"i":0,"s":"You, they're on your left","t":"You do, since the other car is on your left"},{"i":1,"s":"The other car, cross street","t":"The other car, since it is on a cross street"},{"i":3,"s":"Both go together","t":"Both cars together, since both stopped at once"}],"sv":1}]},{"id":"s8c-010","k":"bike","cv":null,"sv":0,"hard":true,"title":"CYCLIST","name":"Cyclist","fail":"ticket","teach":"Pass a cyclist with at least 3 feet between any part of your car and the cyclist.","why":"A rider can wobble. Space gives them time.","action":{"correct":"change_lane","wrong_crash":"keep_going","cite":"Pass a cyclist with at least 3 feet between any part of your car and the cyclist."},"short":"Passing a cyclist: leave 3 feet or more.","roast":"You'd pass a cyclist with no room to spare.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/safe-driving-cont2/","qs":[{"id":"q-4-133","tier":"t1","stem":"How much room must you leave when you pass a bicyclist?","ci":2,"o":[{"i":2,"s":"At least 3 feet","t":"At least 3 feet"},{"i":0,"s":"At least 1 foot","t":"At least 1 foot"},{"i":1,"s":"At least 2 feet","t":"At least 2 feet"}]},{"id":"q-5b-019","tier":"t1","stem":"What is the least space you must leave between your vehicle and a cyclist when you pass?","ci":0,"o":[{"i":0,"s":"3 feet","t":"3 feet"},{"i":1,"s":"2 feet","t":"2 feet"},{"i":3,"s":"4 feet","t":"4 feet"}]},{"id":"q-4-135","tier":"t2","stem":"How is the 3-foot gap for passing a cyclist measured?","ci":2,"o":[{"i":2,"s":"Any part to any part","t":"From any part of your vehicle to any part of the bike or rider"},{"i":0,"s":"Middle to middle","t":"From the middle of your car to the middle of the bicycle"},{"i":3,"s":"Headlights to front wheel","t":"From your car's headlights to the bicycle's front wheel as you pull level"}]},{"id":"q-5b-020","tier":"t2","stem":"You are overtaking a cyclist on a quiet two-lane road. How much room must lie between your side mirror and the rider's elbow?","ci":1,"o":[{"i":1,"s":"At least 3 feet","t":"At least 3 feet"},{"i":0,"s":"Just enough not to touch","t":"Enough that you do not touch them"},{"i":3,"s":"At least 6 feet","t":"At least 6 feet"}]}]},{"id":"s6_p11_roadway-046","k":"bike","cv":null,"sv":0,"hard":true,"title":"CYCLIST AHEAD","name":"Cyclist in your lane","fail":"ticket","teach":"Never pass a cyclist within your own lane; change lanes when it is safe, then pass.","why":"A cyclist needs more room than your lane gives.","action":{"correct":"change_lane","wrong_crash":"keep_going","cite":"Never pass a cyclist within your own lane; change lanes when it is safe, then pass."},"short":"Cyclist in your lane: change lanes to pass.","roast":"You'd squeeze past a cyclist in your own lane.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/laws-and-rules-of-the-road-cont/","qs":[{"id":"q-5b-022","tier":"t1","stem":"A cyclist rides in your lane and the next lane in your direction is open. How must you pass?","ci":2,"o":[{"i":2,"s":"Change lanes, then pass","t":"Change lanes first, then pass"},{"i":0,"s":"Stay in lane, extra room","t":"Stay in your lane and pass with extra room"},{"i":1,"s":"Honk until rider moves over","t":"Honk until the rider moves over, then pass"}]},{"id":"q-6-127","tier":"t2","stem":"You reach a cyclist in your lane but the next lane is not yet clear. What should you do?","ci":1,"o":[{"i":1,"s":"Wait, then change lanes","t":"Wait behind the cyclist until you can change lanes safely"},{"i":0,"s":"Edge past, wide gap","t":"Edge past within your own lane, leaving a wide gap"},{"i":2,"s":"Stop till rider leaves","t":"Stop and wait for the cyclist to pull off the road"}]},{"id":"q-5b-023","tier":"t2","stem":"On a three-lane street, a cyclist rides in the right lane ahead of you and the middle lane is clear. What is your move?","ci":1,"o":[{"i":1,"s":"Signal, change lanes, pass","t":"Check mirror, signal, move into the middle lane, then pass"},{"i":0,"s":"Squeeze by with 3 feet","t":"Squeeze by in the right lane, 3 feet from the rider"},{"i":3,"s":"Stay behind, pass in lane","t":"Stay behind the rider until the light, then pass in the same lane"}]}]},{"id":"s6_p11_run3-017","k":"curb","cv":"red","sv":0,"hard":true,"title":"RED CURB","name":"Red curb","fail":"ticket","teach":"Red curb: no stopping, standing or parking. Only a bus may stop, in a marked bus zone.","why":"Red keeps this space clear for traffic and buses.","action":{"correct":"no_stop_here","wrong_crash":"stop_full","cite":"Red curb: no stopping, standing or parking. Only a bus may stop, in a marked bus zone."},"short":"Red curb: never stop.","roast":"You'd park at the red curb and get towed.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/navigating-the-roads-cont1/","qs":[{"id":"q-1b-037","tier":"t1","stem":"Which list shows everything a red curb bans?","ci":1,"o":[{"i":1,"s":"All three: stop, stand, park","t":"Stopping, standing and parking, all three"},{"i":0,"s":"Parking only; loading fine","t":"Parking only; stopping to load is fine"},{"i":3,"s":"Stop, park; waiting is fine","t":"Stopping and parking; waiting in the car is fine"}]},{"id":"q-2a-067","tier":"t1","stem":"What does a red curb mean?","ci":0,"o":[{"i":0,"s":"No stop, stand or park","t":"No stopping, standing or parking"},{"i":1,"s":"No parking; loading is fine","t":"No parking, but you may stop to load"},{"i":2,"s":"Parking for limited time","t":"Parking for a limited time"}]},{"id":"q-1b-038","tier":"t2","stem":"You are late and want to dash into a shop for 30 seconds. The only space is a red curb. What is the right call?","ci":1,"o":[{"i":1,"s":"Find a legal space","t":"Find a legal space instead"},{"i":0,"s":"Hazards on, engine off","t":"Hazard lights on, engine off, and be quick"},{"i":2,"s":"Stop, stay in the car","t":"Stop if you stay in the car with the engine off"}]},{"id":"q-2a-068","tier":"t2","stem":"You need to drop a parcel and will be out of your car for only 30 seconds. The only open curb is red. What do you do?","ci":3,"o":[{"i":3,"s":"Drive on, legal curb","t":"Drive on and stop at a legal curb"},{"i":1,"s":"Stop, 30 seconds is brief","t":"Stop just long enough, because 30 seconds is too short to matter"},{"i":2,"s":"Double-park for 30 seconds","t":"Drive on and double-park beside a parked car for 30 seconds"}]},{"id":"q-1b-039","tier":"t3","stem":"Which pair describes red and white curbs correctly?","ci":1,"o":[{"i":1,"s":"Red no stopping; white passengers","t":"Red: no stopping. White: quick passenger stop"},{"i":0,"s":"Red passengers; white no stopping","t":"Red: quick passenger stop. White: no stopping"},{"i":2,"s":"Red loading; white parking","t":"Red: loading. White: parking"}]}]},{"id":"s6_p11_run3-008","k":"curb","cv":"white","sv":0,"hard":true,"title":"WHITE CURB","name":"White curb","fail":"ticket","teach":"White curb: stop only to load or unload passengers, or to deposit mail in the adjacent mailbox.","why":"A white curb keeps a quick drop-off spot free.","action":{"correct":"stop_full","wrong_crash":"stay_parked","cite":"White curb: stop only to load or unload passengers, or to deposit mail in the adjacent mailbox."},"short":"White curb: passenger pick-up or drop-off only.","roast":"You'd park at the white curb and block the drop-off.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/navigating-the-roads-cont1/","qs":[{"id":"q-1b-022","tier":"t1","stem":"What does a white curb mean?","ci":1,"o":[{"i":1,"s":"Passenger pick-up, drop-off only","t":"Passenger pick-up and drop-off only"},{"i":0,"s":"Loading goods only","t":"Loading goods only"},{"i":2,"s":"Disabled drivers' parking only","t":"Parking for disabled drivers only"}]},{"id":"q-1b-031","tier":"t1","stem":"How long may you stop at a white curb?","ci":3,"o":[{"i":3,"s":"Just boarding or exiting time","t":"Just the time it takes for people to get in or out"},{"i":0,"s":"Stay in car, engine off","t":"As long as a passenger stays in the car with the engine off"},{"i":1,"s":"Ten minutes, if you're close","t":"Up to ten minutes, if you stay close"}]},{"id":"q-1b-023","tier":"t2","stem":"You need to leave your car for an hour outside a post office. The only open space is next to a white curb. What now?","ci":3,"o":[{"i":3,"s":"Find another space","t":"Find another space instead"},{"i":0,"s":"Park there, engine running","t":"Park there with the engine running so you can move if asked"},{"i":2,"s":"Five minutes only, then move","t":"Leave the car there for five minutes only, then move it"}],"keep":true},{"id":"q-2a-071","tier":"t2","stem":"You drop a friend at a white curb. Then you walk into a shop and leave the car for an hour. Which statement is right?","ci":1,"o":[{"i":1,"s":"For passengers, not parking","t":"A white curb is for passengers, not for parking"},{"i":0,"s":"Fine; friend got out first","t":"That is fine, since your friend got out of the car first"},{"i":2,"s":"Needs a permit you lack","t":"The white curb needs a permit that you lack"}],"keep":true},{"id":"q-2a-072","tier":"t2","stem":"A white curb and a yellow curb both allow brief stops. How do they differ?","ci":0,"o":[{"i":0,"s":"White passengers; yellow commercial","t":"White is for passengers; yellow is for commercial loading"},{"i":1,"s":"White freight, yellow passengers","t":"White is for freight; yellow is for passengers"},{"i":3,"s":"Same: both serve any driver","t":"They are the same; both serve any driver stopping briefly"}]}]},{"id":"s6_p11_run3-010","k":"curb","cv":"yellow","sv":0,"hard":true,"title":"YELLOW CURB","name":"Yellow curb","fail":"ticket","teach":"Yellow curb: stop only to load or unload passengers or freight, for the time local rules allow.","why":"Loading zones keep deliveries off the road.","action":{"correct":"stop_full","wrong_crash":"stay_parked","cite":"Yellow curb: stop only to load or unload passengers or freight, for the time local rules allow."},"short":"Yellow curb: load or unload only.","roast":"You'd park in the loading zone.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/navigating-the-roads-cont1/","qs":[{"id":"q-1b-028","tier":"t1","stem":"What may you do at a yellow curb?","ci":3,"o":[{"i":3,"s":"Load or unload when posted","t":"Load or unload during the posted hours"},{"i":0,"s":"Leave the car all day","t":"Leave the car there all day"},{"i":1,"s":"Stay an hour, shopping","t":"Stay up to an hour while you shop"}]},{"id":"q-2a-076","tier":"t1","stem":"What does a yellow curb mean?","ci":0,"o":[{"i":0,"s":"Commercial loading, posted limits","t":"Commercial loading, within posted time limits"},{"i":1,"s":"Residents' parking only","t":"All-day parking for local residents only"},{"i":3,"s":"No stopping or standing","t":"No stopping or standing at any time"}]},{"id":"q-1b-029","tier":"t2","stem":"A shop assistant pulls up at a yellow curb to unload boxes. Is that fine?","ci":1,"o":[{"i":1,"s":"Yes, in posted hours","t":"Yes, during the hours posted for loading"},{"i":0,"s":"No, only trucks may use","t":"No, only trucks may use yellow curbs"},{"i":3,"s":"No, stopping is banned","t":"No, yellow means stopping is banned"}]},{"id":"q-2a-077","tier":"t2","stem":"A plumber unloads pipes at a yellow curb. A sign shows a 20-minute limit. How long may the van stay?","ci":1,"o":[{"i":1,"s":"20 minutes, per the sign","t":"Up to 20 minutes, since the posted sign sets the limit"},{"i":0,"s":"Until the job is done","t":"As long as the job takes, since work vehicles are exempt"},{"i":3,"s":"Half hour is standard","t":"Up to 30 minutes, since a loading zone allows a standard half hour"}]},{"id":"q-2a-078","tier":"t3","stem":"Which is the right match of curb color and use?","ci":2,"o":[{"i":2,"s":"Yellow commercial loading; green timed","t":"Yellow: commercial loading; green: limited parking"},{"i":0,"s":"Yellow passengers; white commercial","t":"Yellow: passenger pick-up; white: commercial loading"},{"i":3,"s":"Yellow no stopping; red commercial","t":"Yellow: no stopping; red: commercial loading"}]}]},{"id":"s6_p11_run3-009","k":"curb","cv":"green","sv":0,"hard":true,"title":"GREEN CURB","name":"Green curb","fail":"ticket","teach":"Green curb: park only for the time limit set by local rules; read the sign.","why":"The time limit changes from place to place. Read the sign.","action":{"correct":"stop_full","wrong_crash":"stay_parked","cite":"Green curb: park only for the time limit set by local rules; read the sign."},"short":"Green curb: obey the posted time limit.","roast":"You'd overstay the green curb time limit.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/navigating-the-roads-cont1/","qs":[{"id":"q-1b-025","tier":"t1","stem":"A green curb space is empty and nobody is nearby. Who may use it?","ci":2,"o":[{"i":2,"s":"Any driver, to posted limit","t":"Any driver, up to the posted time"},{"i":0,"s":"Only drivers loading freight","t":"Only drivers loading freight or deliveries"},{"i":1,"s":"Any driver, however long","t":"Any driver, for as long as they wish"}]},{"id":"q-2a-073","tier":"t1","stem":"What does a green curb mean?","ci":0,"o":[{"i":0,"s":"Time-limited, varies by place","t":"Limited-time parking; the limit varies by place"},{"i":1,"s":"Park as long as wanted","t":"Parking for as long as you like, day or night"},{"i":2,"s":"Fixed 15-minute limit everywhere","t":"A fixed 15-minute limit at every green curb"}]},{"id":"q-1b-026","tier":"t2","stem":"You pull up at a green curb to run into a shop. How do you learn how long you may stay?","ci":2,"o":[{"i":2,"s":"Read the posted sign","t":"Read the sign posted at that curb"},{"i":0,"s":"Ask the shop owner","t":"Ask the shop owner to tell you the rule"},{"i":3,"s":"Leave a return-time note","t":"Leave a note on the dash with your return time"}]},{"id":"q-2a-074","tier":"t2","stem":"A green curb has a sign that says 30 minutes. You want to park for two hours. What do you do?","ci":2,"o":[{"i":2,"s":"No longer than 30 minutes","t":"Stay no longer than 30 minutes, or go elsewhere"},{"i":1,"s":"Sign limit: only a suggestion","t":"Park for two hours, since the sign limit is only a suggestion"},{"i":3,"s":"30 minutes, then move ahead","t":"Stay 30 minutes, then move one space ahead and park again"}]},{"id":"q-2a-075","tier":"t3","stem":"Which statement about green and white curbs is right?","ci":1,"o":[{"i":1,"s":"Green timed; white passengers","t":"Green is limited-time parking; white is for passenger loading"},{"i":0,"s":"Green passengers; white timed","t":"Green is for passenger drop-off; white is for limited parking"},{"i":3,"s":"Both are timed parking","t":"Both are limited-time parking"}]}]},{"id":"s6_p11_run3-018","k":"curb","cv":"blue","sv":0,"hard":true,"title":"BLUE CURB","name":"Blue curb","fail":"ticket","teach":"Blue curb: only vehicles of disabled persons and disabled veterans with permits may park.","why":"Those spaces are kept for drivers with a disabled permit.","action":{"correct":"no_stop_here","wrong_crash":"stop_full","cite":"Blue curb: only vehicles of disabled persons and disabled veterans with permits may park."},"short":"Blue curb: disabled permit only.","roast":"You'd take a blue curb space without a permit.","cite":"https://dmv.ca.gov/portal/handbook/california-driver-handbook/navigating-the-roads-cont1/","qs":[{"id":"q-1b-040","tier":"t1","stem":"Who may use a blue curb space?","ci":0,"o":[{"i":0,"s":"Disabled permit drivers","t":"Drivers with a disabled person's permit"},{"i":1,"s":"Anyone for ten minutes","t":"Anyone for ten minutes"},{"i":3,"s":"Delivery vehicles","t":"Delivery vehicles"}]},{"id":"q-2a-079","tier":"t1","stem":"Who may park at a blue curb?","ci":1,"o":[{"i":1,"s":"Disabled placard or plates","t":"Drivers with a disabled placard or special plates"},{"i":0,"s":"Anyone making a short stop","t":"Anyone making a short stop of a few minutes"},{"i":2,"s":"Anyone who pays the meter","t":"Any driver who pays the meter fee"}]},{"id":"q-2a-080","tier":"t2","stem":"You run into a shop for one minute and find the only free space has a blue curb. You have no placard. What do you do?","ci":3,"o":[{"i":3,"s":"Find a different space","t":"Find a different space"},{"i":0,"s":"Park there for one minute","t":"Park there for one minute"},{"i":2,"s":"Wait until a space opens","t":"Wait in the lane until a regular space opens up"}]},{"id":"q-1b-042","tier":"t3","stem":"Blue and white curbs differ. Which is right?","ci":3,"o":[{"i":3,"s":"Blue permits; white passengers","t":"Blue is for permit holders, white is for quick passenger stops"},{"i":0,"s":"White permits; blue passengers","t":"White is for disabled permit holders, blue is for quick passenger stops"},{"i":2,"s":"Blue: anyone stopping briefly","t":"Blue is for anyone stopping briefly"}]},{"id":"q-2a-081","tier":"t3","stem":"Which curb color is reserved for disabled drivers, and which allows loading for passengers?","ci":0,"o":[{"i":0,"s":"Blue disabled; white passengers","t":"Blue is for disabled drivers; white is for passenger loading"},{"i":1,"s":"White disabled; blue passengers","t":"White is for disabled drivers; blue is for passenger loading"},{"i":2,"s":"Green disabled; white loading","t":"Green is for disabled drivers; white is for loading"}]}]}];
+/*RUSH-UNITS-END*/
+const RULES=RUSH_UNITS.map(u=>Object.assign({cl:u.k==='curb'||u.k==='hydrant'},u));
+const CURBC={red:'#d62d20',white:'#f7f7f7',yellow:'#f2c200',green:'#2ea043',blue:'#1f6fe0'};
 /* scene config: stop = metres before the anchor where the car halts; hold = seconds stopped; gap = intersection; vz = own speed */
-const SC={bus:{stop:7,hold:.6},'4way':{stop:11.5,hold:.7,gap:1},cross:{stop:8,hold:.5},yellow:{stop:11.5,hold:.8,gap:1},amb:{hold:.8},flag:{stop:8,hold:.6},bike:{vz:6},curb:{hold:.9}};
-/* Seeded daily route: the same 6 rules, order, re-asks and answer wording for every player on a local calendar date.
- Each of the 6 rules is asked TWICE: first ask right after its teach card (F), re-ask 3 to 5 moments later in new words and a
- shorter timer (R). Pattern FFFRFRFRFRRR; re-asks follow the first-ask order. Each day uses 2 of Kyle's 3 adult-trap rules
- (curb colors, 3-foot cyclist pass, 4-way stop; HARD_N) and 4 of the 5 easy rules (EASY_N) = 4 hard moments of 12.
- The answer LANES are not in the route: they are shuffled on every attempt, so a replay cannot be won from memory of positions. */
-const HARD_N=2,EASY_N=4;
+const SC={bus:{stop:7,hold:.6},'4way':{stop:11.5,hold:.7,gap:1},cross:{stop:8,hold:.5},yellow:{stop:11.5,hold:.8,gap:1},amb:{hold:.8},flag:{stop:8,hold:.6},bike:{vz:6},curb:{hold:.9},hydrant:{hold:.9}};
+/* ---------- levels (card RH2b, v3: play first) ----------
+ A level = a set of rule families (one unit per family), a cruise speed, a timer scale (x0.9 per level) and a coin target. Moments 1 and 2 are played, moment 3 is a question, then every 4th (3 of 4 played).
+ Level 1 has 4 families; level 2 adds 2, level 3 adds 1, level 4 adds 2, level 5 adds none and is the fastest.
+ A family keeps its unit for two levels, then the next unit of the family (a new rule gets a teach card). */
+const FAM_ADD=[null,['bus','yellow','amb','hydrant'],['flag','cross'],['bike'],['4way','curb'],[]];
+const MAXL=5,FAM_INTRO={};FAM_ADD.forEach((a,L)=>{if(a)a.forEach(f=>{FAM_INTRO[f]=L})});
 const DAY=(d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))(new Date());  /* local date, like Wordle */
 const SEED=(DEV&&+Q.get('seed'))||+DAY.replace(/-/g,'');
-function buildRoute(seed){
- const pr=mul(seed),sh=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(pr()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
- const idx=RULES.map((_,i)=>i),hard=sh(idx.filter(i=>RULES[i].hard)).slice(0,HARD_N),easy=sh(idx.filter(i=>!RULES[i].hard)).slice(0,EASY_N);
- let order;do{order=sh(hard.concat(easy))}while(RULES[order[0]].hard);
- const PAT='FFFRFRFRFRRR',route=[];let f=0,r=0;
- for(const c of PAT){if(c==='F')route.push({rule:order[f++],ask:1});else route.push({rule:order[r++],ask:2})}
- return route}
-/* per-attempt answer lanes: 4 correct lanes each, never 3 in a row; wrong answers placed at random */
-function makeLanes(){let a;for(let k=0;k<300;k++){a=[0,0,0,0,1,1,1,1,2,2,2,2];for(let i=11;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}
- if(!a.some((v,i)=>i>1&&v===a[i-1]&&v===a[i-2]))break}return a}
+const FAMU={};RULES.forEach((r,i)=>{(FAMU[r.k]=FAMU[r.k]||[]).push(i)});
+const shuf=(a,pr)=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(pr()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
+const FORD={};Object.keys(FAMU).forEach((f,i)=>{FORD[f]=shuf(FAMU[f].slice(),mul(SEED*31+i*977+5))});
+const lvFam=L=>{let a=[];for(let i=1;i<=L;i++)a=a.concat(FAM_ADD[i]);return a};
+const lvTS=L=>Math.pow(.9,L-1);                                   /* timers shrink 10 percent per level */
+const lvTarget=L=>190+30*L;                                       /* 220, 250, 280, 310, 340 coins */
+const lvUnit=(f,L)=>{const a=FORD[f];return a[Math.floor((L-FAM_INTRO[f])/2)%a.length]};
+const levelUnits=L=>lvFam(L).map(f=>lvUnit(f,L));
+/* the moments of a level: every 4th is a question, the rest are played; units come in shuffled rounds, never the same twice in a row */
+function buildMoments(L){const pr=mul(SEED*131+L*7919),us=levelUnits(L),out=[];let last=-1,bag=[];
+ for(let i=0;i<64;i++){if(!bag.length){bag=shuf(us.slice(),pr);if(bag[0]===last&&bag.length>1){const t=bag[0];bag[0]=bag[1];bag[1]=t}}
+  const u=bag.shift();last=u;out.push({u,k:i%4===2?'q':'p',r:pr()})}
+ return out}
 
 /* ---------- audio: WebAudio synth, no files. Ported from the slice (game/src/audio/engine.ts, schedule.ts) ---------- */
 const MK='greenlight.rush.muted',CK='greenlight.rush.calm';
@@ -296,6 +214,9 @@ const SFX={
  fail(E,t){[67,63,60,55].forEach((m,i)=>tone(E,t+i*.22,m,.2,.4,'sawtooth',800,.02,.3));sweep(E,t+.88,110,40,.6,'sine',.5,300)},
  copy(E,t){tone(E,t,88,.04,.3,'sine',4000,.005,.08);tone(E,t+.07,95,.08,.3,'sine',4000,.005,.14)},
  tick(E,t){tone(E,t,84,.03,.2,'sine',3000,.005,.06)},
+ coinloss(E,t){tone(E,t,76,.07,.3,'triangle',2400,.005,.1,.2);tone(E,t+.09,70,.07,.3,'triangle',2400,.005,.1,.2);tone(E,t+.18,64,.16,.3,'triangle',2000,.005,.25,.2)},   /* three notes down: coins lost */
+ life(E,t){sweep(E,t,170,45,.5,'sine',.55,320);tone(E,t+.05,55,.2,.3,'sawtooth',500,.02,.35);tone(E,t+.3,52,.45,.3,'sawtooth',420,.02,.6)},   /* low drop: a life lost */
+ honk(E,t){tone(E,t,60,.2,.18,'square',1100,.01,.05);tone(E,t,64,.2,.18,'square',1100,.01,.05);tone(E,t+.3,60,.2,.18,'square',1100,.01,.05);tone(E,t+.3,64,.2,.18,'square',1100,.01,.05)},
  riser(E,t){const c=E.ctx,o=c.createOscillator(),f=c.createBiquadFilter(),g=c.createGain();o.type='sawtooth';o.frequency.setValueAtTime(180,t);o.frequency.exponentialRampToValueAtTime(1500,t+1);
   f.type='lowpass';f.frequency.setValueAtTime(400,t);f.frequency.exponentialRampToValueAtTime(7000,t+1);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.12,t+.9);g.gain.linearRampToValueAtTime(0,t+1.05);
   o.connect(f);f.connect(g);g.connect(E.sfx);o.start(t);o.stop(t+1.1);noise(E,t,1,.1,'highpass',500,5000,.7)}};
@@ -310,83 +231,95 @@ function audio(){if(NOAUDIO)return;try{if(!AC){AC=new(window.AudioContext||windo
 function setMuted(v){MUTED=v;store.set(MK,v?'1':'0');if(AE){const p=AE.master.gain,t=AC.currentTime;p.cancelScheduledValues(t);p.setTargetAtTime(v?0:.8,t,.03)}if(!v){audio();if(G&&G.mode==='run'&&G.phase!=='over')musicOn()}}
 const lowMusic=on=>{if(AE)AE.setLow(on)};
 function layerNow(){const m=mu(G.streak);return m>=3?2:m>=2?1:0}
-
 /* ---------- state ---------- */
 const LINK=location.protocol==='file:'?'https://henry-the-robot.github.io/greenlight-play/proto/rush-hour/':location.origin+location.pathname;
-const COPY={x:50,y:606,w:290,h:50},RUN={x:50,y:696,w:290,h:74},MUTEB={x:336,y:0,w:54,h:50},CALMB={x:95,y:586,w:200,h:46};
-function relayout(){const c=H>=820;Object.assign(COPY,c?{x:50,y:606,w:290,h:50}:{x:50,y:H-166,w:290,h:46});Object.assign(RUN,c?{x:50,y:696,w:290,h:74}:{x:50,y:H-96,w:290,h:58});CALMB.y=Math.min(586,H-100)}
+const COPY={x:50,y:594,w:290,h:46},RUN={x:50,y:540,w:290,h:46},MINI={x:50,y:486,w:290,h:46},ADB={x:50,y:432,w:290,h:46},MUTEB={x:336,y:0,w:54,h:50},CALMB={x:95,y:586,w:200,h:46};
+function relayout(){COPY.y=H-24-COPY.h;RUN.y=COPY.y-54;MINI.y=RUN.y-54;ADB.y=MINI.y-54;CALMB.y=Math.min(586,H-100)}
 const CARCOL=['#e63946','#2a9d8f','#f4a261','#6c5ce7','#00b4d8','#8d99ae','#e9c46a'];
-let G=null,ROUTE=buildRoute(SEED);
-/* answer windows in seconds: first ask 7, re-ask 5, third ask 4 (the daily route has two asks per rule, so the third is reserved); Calm doubles them */
-const winOf=(ask,calm)=>(ask===1?7:ask===2?5:4)*(calm?2:1);
-function blank(mode){return{mode,t:0,runT:0,warp:1,warpOn:0,pd:0,px:0,lanes:makeLanes(),flips:Array.from({length:12},()=>rnd()<.5),dist:0,v:13,vq:0,boost:0,dec:30,lane:1,xo:null,carX:0,tilt:0,spin:0,score:0,streak:0,bestStreak:0,strikes:0,right:0,done:0,mi:-1,
- miss:{},missOrder:[],phase:'calm',pt:0,td:undefined,calmT:1.3,pendingQuiz:false,cur:null,q:null,S:null,res:null,objs:[],pops:[],flash:null,shake:0,verdict:null,lock:null,rres:{},calm:CALM,coinN:0,
- log:[],gaps:[],endZ:1e9,popS:0,sirenT:0,endT:0,overT:0,result:null,conf:[],dmv:0,copied:0}}
+/* v3 numbers. Coins: right +30, wrong but safe -15, crash -20 (and a life), question right +30 (+15 if fast), question wrong -20, road coin +1. */
+const DEC=15,ACC=9,BRAKE_DELAY=.1,CRAWLV=2.5,C_OK=30,C_BAD=-15,C_CRASH=-20,C_QBAD=-20,C_QFAST=15,CUR_MAX=8,IDLE_HONK=3,IDLE_HIT=8,AD_SEC=15,HK='greenlight.rush.hint';
+let G=null;
+const wc=s=>s.trim().split(/\s+/).length;
+function blank(mode){return{mode,t:0,runT:0,warp:1,pd:0,px:0,dist:0,v:13,vq:13,cruise:13,boost:0,dec:30,lane:1,xo:null,carX:0,tilt:0,spin:0,
+ level:1,coins:0,bank:0,target:lvTarget(1),lives:3,extraUsed:false,crashes:0,streak:0,bestStreak:0,right:0,done:0,played:0,asked:0,moments:[],mi:-1,taught:{},seen:{},rres:{},missOrder:[],
+ phase:'drive',pt:0,gapT:2.5,cur:null,q:null,S:null,res:null,cc:null,objs:[],pops:[],flash:null,shake:0,verdict:null,toast:null,banner:null,hint:null,lock:null,
+ log:[],gaps:[],endZ:1e9,popS:0,sirenT:0,endT:0,result:null,conf:[],copied:0,calm:CALM,coinN:0,idleT:0,honked:false,braking:false,ad:null,adN:0,lastCrash:null,lvT:0}}
 function fmtT(t){const n=Math.floor(t*10+1e-6),m=Math.floor(n/600),s=(n%600)/10;return m+':'+(s<10?'0':'')+s.toFixed(1)}
 const pop=(s,x,y,col,size)=>G.pops.push({s,x,y,col,size:size||22,t:0});
 const verdict=(s,col,size)=>{G.verdict={s,col,size:size||56,t:0}};
 const flash=(col,a)=>{G.flash={col,a}};
-function startRun(){const v=G?G.v:13;G=blank('run');G.v=Math.max(v,13);ROUTE=buildRoute(SEED);G.calmT=1.3;calmScript();lowMusic(false);if(AE)AE.layer=0;musicOn()}
+const lvSpeed=L=>(13+2*(L-1))*(CALM?.8:1);
+const ACT_TXT={stop_full:'Stop completely. Wait until it is clear.',stop_line:'Stop before the line. Wait for green.',pull_right_stop:'Move to the right lane. Stop until the siren has passed.',change_lane:'Change lanes to pass, or slow down behind it.',wait_turn:'Stop. Go only after the other car has gone.',no_stop_here:'Keep rolling. Do not stop here.',keep_moving:'Keep moving unless a rule tells you to stop.'};
+const REAR={title:'STOPPED IN TRAFFIC',teach:'Do not stop in a lane of traffic without a reason.',why:'Cars behind you cannot see why you stopped.',short:'Keep moving. Do not block traffic.',k:'curb',hard:false,action:{correct:'keep_moving'}};
+const actOf=r=>(r.action&&r.action.correct)||'keep_moving';
+function startRun(){const keep=G&&G.calm;G=blank('run');G.calm=CALM;G.cruise=lvSpeed(1);G.v=G.cruise*.8;startLevel(1,true);lowMusic(false);if(AE)AE.layer=0;musicOn();if(DEV){window.__adLog=[]}}
+const TEACH_EACH_LEVEL=Q.get('teach')==='level';   /* default: a teach card the first time a rule appears in the whole run; ?teach=level shows it again on the first appearance in every level */
+function startLevel(L,first){const g=G;if(TEACH_EACH_LEVEL)g.taught={};g.level=L;g.coins=0;g.target=lvTarget(L);g.moments=buildMoments(L);g.mi=-1;g.cruise=lvSpeed(L);g.vq=g.cruise;g.S=null;g.q=null;g.res=null;g.cc=null;g.objs=[];g.lvT=0;
+ const nf=FAM_ADD[L].map(f=>RULES[lvUnit(f,L)].name);
+ g.banner={t:0,l1:'LEVEL '+L,l2:'Reach '+g.target+' coins',l3:nf.length>2?nf.length+' rules to learn':nf.length?'New: '+nf.join(', '):'Fastest level'};
+ if(first&&store.get(HK)!=='1'){g.hint={t:0};store.set(HK,'1')}
+ g.pt=0;g.phase='drive';g.gapT=first?3.8:2;g.idleT=0;calmCoins()}
+function calmCoins(){const g=G,o=[0,1,2].filter(l=>l!==g.lane),cl=o[(rnd()*2)|0];spawnCoins(cl,5,g.cruise*.9+6)}
 function spawnCoins(l,n,z0){G.coinN=0;for(let i=0;i<n;i++)G.objs.push({t:'coin',wz:G.dist+z0+i*5,x:(l-1)*LN,age:0})}
-function spawnCar(l,z0){G.objs.push({t:'car',wz:G.dist+z0,x:(l-1)*LN,age:0,col:CARCOL[(rnd()*CARCOL.length)|0]})}
-function calmScript(){const g=G,v=Math.max(g.v,22),L=g.lane,o=[0,1,2].filter(l=>l!==L),cl=o[(rnd()*2)|0];
- spawnCoins(cl,6,v*.9+6);if(g.mi>0)spawnCar(L,v*1.8+8)}
-function nextMoment(){const g=G;g.mi++;
- if(g.mi>=12){g.phase='finale';g.pt=0;g.dmv=g.dist+140;g.endZ=g.dmv+1;return}
- g.cur=ROUTE[g.mi];
- if(g.cur.ask===1){g.phase='teach';g.pt=0;g.td=undefined;lowMusic(true);snd('card')}else{g.phase='calm';g.pt=0;g.calmT=1.3;g.pendingQuiz=true;calmScript()}}
-function closeTeach(){const g=G;if(g.td!==undefined)return;g.td=0;lowMusic(false);snd('tick')}
-function startQuiz(){const g=G,m=g.cur,rule=RULES[m.rule],vr=rule.v[m.ask-1]||rule.v[0],cl=m.pin?m.cl:g.lanes[g.mi];
- const o=[0,1,2].filter(l=>l!==cl);if(m.pin?m.flip:g.flips[g.mi])o.reverse();
- const ans=[];ans[cl]={s:vr.a[0].s,t:vr.a[0].t,ok:true};ans[o[0]]={s:vr.a[1].s,t:vr.a[1].t,ok:false};ans[o[1]]={s:vr.a[2].s,t:vr.a[2].t,ok:false};ans.forEach(a=>{a.lines=wrapT(a.s,92,16)});
- const Wd=winOf(m.ask,g.calm);
- /* the quiz opens with the question alone (q.t runs from -PRE to 0), then the signs land; the car eases to VQ and arrives at the scene when the window ends */
- g.vq=VQ;g.lane=1;g.xo=null;g.boost=0;g.q={rule:m.rule,ans,cl,W:Wd,t:-PRE,move:-1,qs:vr.q};
- g.pendingQuiz=false;g.phase='quiz';g.res=null;
+function enterDrive(gap){const g=G;g.phase='drive';g.gapT=gap;g.pt=0;g.q=null;g.res=null;g.xo=null;lowMusic(false);calmCoins()}
+function addCoins(n){const g=G;g.coins=Math.max(0,g.coins+n)}
+function nextMoment(){const g=G;
+ if(g.coins>=g.target){levelClear();return}
+ g.mi++;g.cur=g.moments[g.mi%g.moments.length];
+ if(!g.taught[g.cur.u]){g.phase='teach';g.pt=0;g.td=undefined;lowMusic(true);snd('card');return}
+ beginMoment()}
+function beginMoment(){const g=G,m=g.cur;g.taught[m.u]=1;lowMusic(false);if(m.k==='q')startQuiz();else spawnPlay(m.u)}
+function closeTeach(){const g=G;if(g.td!==undefined)return;if(DEV)window.__teachClosedAt=g.pt;g.td=0;lowMusic(false);snd('tick')}
+/* sign text: the label, 19 px, up to 4 lines of 92 px, the block at most 90 px high; longer labels drop to 17, 15 or 13 px. Bar text: the full bank option, 18 px down to 14 px, two lines (three at 14 px). */
+function signFit(s){let r;for(const[fs,mx]of[[19,4],[17,4],[15,5],[13,5]]){const l=wrapT(s,92,fs);r={lines:l,fs};
+  if(l.length<=mx&&l.length*(fs+3)<=90&&l.every(x=>cx.measureText(x).width<=94))return r}return r}
+function barFit(t){for(const fs of[18,17,16,15,14]){const l=wrapT(t,308,fs);if(l.length<=(fs===14?3:2))return{lines:l,fs}}return{lines:wrapT(t,308,13),fs:13}}
+function startQuiz(){const g=G,m=g.cur,rule=RULES[m.u],ask=g.seen[m.u]?2:1;g.seen[m.u]=(g.seen[m.u]||0)+1;m.ask=ask;
+ const qs=rule.qs,idx=qs.map((q,i)=>i),pool=idx.filter(i=>ask===1?qs[i].tier==='t1':qs[i].tier!=='t1'),arr=pool.length?pool:idx,vr=qs[arr[Math.floor(m.r*arr.length)%arr.length]];
+ const cl=Math.floor(rnd()*3),o=[0,1,2].filter(l=>l!==cl);if(rnd()<.5)o.reverse();
+ const ans=[];ans[cl]=Object.assign({ok:true},vr.o[0]);ans[o[0]]=Object.assign({ok:false},vr.o[1]);ans[o[1]]=Object.assign({ok:false},vr.o[2]);
+ ans.forEach(a=>{const f=signFit(a.s),b=barFit(a.t);a.lines=f.lines;a.fs=f.fs;a.bl=b.lines;a.bs=b.fs});
+ const W=Math.round((ask===1?7:5)*lvTS(g.level)*(g.calm?2:1)*10)/10,rd=Math.max(2,.3*(wc(vr.stem)+ans.reduce((s,a)=>s+wc(a.s),0)));
+ /* the road crawls while the question is open; the clock starts after the reading delay (0.3 s a word of question and labels, at least 2 s) */
+ g.vq=g.cruise;g.lane=1;g.xo=null;g.boost=0;g.q={rule:m.u,ans,cl,W,rd,tot:rd+W,t:0,move:-1,qs:vr.stem,qid:vr.id,tier:vr.tier,ask};
+ g.phase='quiz';g.res=null;g.asked++;
  for(const ob of g.objs)if(ob.fade===undefined)ob.fade=1;
- const cf=SC[rule.k],vz=cf.vz||0,SW=Wd+PRE;
- const S=g.S={kind:rule.k,vi:m.ask-1,age:0,W:SW,vz,az0:g.dist+GAP+10+(g.vq-vz)*SW,az:0,lv:-1,lights:true,tHit:SW+(GAP-3)/g.vq,sd:1,hitT:undefined,pxl:0,rz:-85};
- S.az=S.az0;if(cf.gap||(rule.k==='cross'&&m.ask===2)){S.gap=1;g.gaps.push([S.az0-8,S.az0+8])}
+ const cf=SC[rule.k],vz=cf.vz||0,SW=rd+W;
+ const sv=vr.sv!==undefined?vr.sv:rule.sv;
+ const S=g.S={kind:rule.k,ru:m.u,vi:sv,cv:rule.cv,keep:vr.keep!==undefined?vr.keep:(rule.k==='hydrant'||rule.cv==='red'||rule.cv==='blue'),age:0,W:SW,vz,az0:g.dist+GAP+10+(CRAWLV-vz)*SW,az:0,lv:-1,lights:true,tHit:SW+(GAP-3)/g.vq,sd:1,hitT:undefined,pxl:0,rz:-85};
+ S.az=S.az0;if(cf.gap||(rule.k==='cross'&&sv===1)){S.gap=1;g.gaps.push([S.az0-8,S.az0+8])}
  g.gaps=g.gaps.filter(x=>x[1]>g.dist-60)}
 function resolve(){const g=G,q=g.q,rule=RULES[q.rule],a=q.ans[g.lane],ok=a.ok,r=q.move<0?1:qr(q.move,q),rr=g.rres[q.rule]=g.rres[q.rule]||{};
- g.done++;rr['a'+g.cur.ask]=ok;
+ g.done++;rr['a'+q.ask]=ok;
  g.res={ok,r,t:0,stage:0,hold:0,go:0,went:false,crashed:false,tk:0,early:ok&&r<FW,gained:0,lane:g.lane,boost:0,card:false,cardT:0};
  const R=g.res;g.phase='res';g.xo=null;
  if(ok){g.right++;g.streak++;g.bestStreak=Math.max(g.bestStreak,g.streak);g.popS=1;
-  const sp=r<FW?Math.round(150*(1-r/FW)):0;R.gained=Math.round((100+sp)*mu(g.streak));g.score+=R.gained;R.boost=r<FW?11+15*(1-r/FW):0;
-  g.log[g.mi]=r<FW?'g':'y';
-  verdict(r<.2?'PERFECT!':r<FW?'TURBO!':'GOOD',r<FW?'#35e08a':'#cfe8ff');pop('+'+R.gained+'  x'+mu(g.streak).toFixed(1),CX,GY-260,'#ffd23f',24);
-  snd('right',r<FW);if(r<FW)flash('#ffffff',.4);
-  if(g.cur.ask===2)g.lock={t:rule.short,tt:0};   /* mastered: a right re-ask */
-  if(g.streak%4===0&&g.strikes>0){g.strikes--;pop('CLEAN RUN: -1 STRIKE',CX,GY-224,'#7dffb0',20);snd('heal',0,0,.4)}}
- else{g.strikes++;g.streak=0;g.miss[q.rule]=(g.miss[q.rule]||0)+1;if(g.missOrder.indexOf(q.rule)<0)g.missOrder.push(q.rule);if(!g.missFirst)g.missFirst={rule:q.rule,vi:g.cur.ask-1};g.log[g.mi]='r';
-  snd('strike');verdict(rule.fail==='crash'?'CRASH!':'TICKET!','#ff4d4d',rule.fail==='crash'?64:60);g.shake=.9;flash('#ff2a2a',.45)}
+  R.gained=C_OK+(R.early?C_QFAST:0);addCoins(R.gained);
+  g.log.push(R.early?'g':'y');
+  verdict(r<.2?'PERFECT!':R.early?'FAST!':'GOOD','#35e08a');pop('+'+R.gained+' coins',CX,GY-260,'#ffd23f',26);
+  snd('right',R.early);[0,1,2].forEach(i=>snd('coin',i,0,.12+i*.07));if(R.early)flash('#ffffff',.3);
+  if(q.ask===2)g.lock={t:rule.short,tt:0}}
+ else{g.streak=0;addCoins(C_QBAD);g.log.push('r');if(g.missOrder.indexOf(q.rule)<0)g.missOrder.push(q.rule);
+  snd('strike');snd('coinloss',0,0,.2);verdict('WRONG','#ff4d4d',56);pop(C_QBAD+' coins',CX,GY-250,'#ff6b6b',26);g.shake=.5;flash('#ff2a2a',.35)}
  if(AE)AE.setLayer(layerNow())}
-function goStart(){const g=G,R=g.res,S=g.S;R.went=true;g.boost=R.boost;g.xo=null;if(S){S.lv=0;S.sd=g.lane===2?-1:1}
- if(R.early){flash('#ffffff',.55);pop('BOOST!',CX,GY-300,'#7dffb0',40);g.popS=1}
- spawnCoins(g.lane,R.early?14:5,18)}
-function endRes(){const g=G;
- if(!g.res.ok&&g.strikes>=3){finish(false,'strikes');return}
- g.q=null;g.res=null;g.xo=null;nextMoment()}
-function stepRes(){const g=G,R=g.res,S=g.S,rule=RULES[g.q.rule],cf=SC[rule.k],base=22+8*Math.max(0,g.mi)/12;let vT=0;R.t+=DT;
+function goStart(){const g=G,R=g.res,S=g.S;R.went=true;g.xo=null;if(S){S.lv=0;S.sd=g.lane===2?-1:1}
+ spawnCoins(g.lane,5,18)}
+function endRes(){const g=G;g.q=null;g.res=null;g.xo=null;g.S&&(g.S.qdone=1);enterDrive(1.3)}
+function stepRes(){const g=G,R=g.res,S=g.S,rule=RULES[g.q.rule],cf=SC[rule.k],base=g.cruise;let vT=0;R.t+=DT;
  if(R.ok){
   if(R.stage===0){
-   if(!S||(S.kind==='curb'&&S.vi===0))R.stage=2;
-   else if(S.kind==='amb'||S.kind==='curb'){g.xo=4.3;g.dec=14;if(g.v<.5)R.stage=1}
-   else if(S.kind==='bike'){g.xo=-LN;vT=Math.max(15,g.vq*.75);g.dec=18;if(S.az-g.dist<-3.5)R.stage=2}
+   if(!S||S.keep)R.stage=2;
+   else if(S.kind==='amb'||rule.cl){g.xo=4.3;g.dec=14;if(g.v<.5)R.stage=1}
+   else if(S.kind==='bike'){g.xo=-LN;vT=Math.max(8,g.vq*.75);g.dec=18;if(S.az-g.dist<-3.5)R.stage=2}
    else{g.xo=0;const d=S.az-cf.stop-g.dist;vT=d>0?Math.min(g.vq,Math.sqrt(22*d)):0;g.dec=24;if(g.v<.6&&d<3)R.stage=1}
    if(R.stage===1){R.hold=0;if(S)S.lights=false}
-   if(R.t>7)R.stage=2}
+   if(R.t>9)R.stage=2}
   else if(R.stage===1){R.hold+=DT;if(R.hold>=(cf.hold||1))R.stage=2}
-  if(R.stage===2){if(!R.went)goStart();R.go+=DT;vT=base+g.boost;if(R.go>.5)endRes()}
+  if(R.stage===2){if(!R.went)goStart();R.go+=DT;vT=base;if(R.go>.5)endRes()}
  }else{
-  const crash=rule.fail==='crash';g.boost=0;
-  const tick=()=>{if(!R.tk){R.tk=1;R.ev=R.t;g.shake=.5;g.sirenT=1.8;pop('TICKET  -1 STRIKE',CX,GY-250,'#ff6b6b',28);snd('hit',false)}};
-  if(crash){g.xo=0;/* the car drifts into the middle of the junction so the hit shows in any lane */
-   if(!R.crashed&&S&&S.az-g.dist<=3){R.crashed=true;R.ev=R.t;S.hitT=S.age;g.v=Math.min(g.v,g.vq)*.18;g.shake=1.3;g.spin=.5;flash('#ff2a2a',.6);pop('CRASH  -1 STRIKE',CX,GY-250,'#ff6b6b',28);snd('hit',true);if(navigator.vibrate)navigator.vibrate(60)}
-   vT=R.crashed?0:g.vq*1.4;g.dec=40}
-  else if(rule.k==='curb'){g.xo=R.t>.1?4.3:null;vT=R.t>.3?0:g.vq;g.dec=14;if(R.t>.7)tick()}
-  else{/* ticket: issued when the car reaches the scene (the siren passes at 0.3 s); the prop then jumps aside so the car does not drive through it */
+  const tick=()=>{if(!R.tk){R.tk=1;R.ev=R.t;g.shake=.5;g.sirenT=1.8;snd('hit',false)}};
+  if(rule.cl){g.xo=R.t>.1?4.3:null;vT=R.t>.3?0:g.vq;g.dec=14;if(R.t>.7)tick()}
+  else{/* the prop jumps aside so the car does not drive through it */
    const reach=!S||(S.kind==='amb'?R.t>.3:S.az-g.dist<=9);
    if(reach&&S&&S.lv<0){S.lv=0;S.sd=g.lane===2?-1:1;S.pxl=pedX(S)}
    if(reach||R.t>2)tick();vT=R.tk?0:g.vq*1.4;g.dec=R.tk?22:14}
@@ -394,85 +327,183 @@ function stepRes(){const g=G,R=g.res,S=g.S,rule=RULES[g.q.rule],cf=SC[rule.k],ba
   if(!R.card&&((R.ev!==undefined&&R.t-R.ev>=.9)||R.t>4.5)){R.card=true;R.cardT=0;lowMusic(true);snd('card')}
   if(R.card){R.cardT+=DT;vT=0;g.dec=30;if(R.dt!==undefined){R.dt+=DT;if(R.dt>=.35){lowMusic(false);endRes()}}}}
  return vT}
-function stepFinale(){const g=G;g.pt+=DT;const d=g.dmv-9.5-g.dist;g.dec=18;
- if(g.v<.4&&d<2.5&&g.pt>1)finish(g.right>=9&&g.strikes<3,g.right<9?'score':'ok');
- return d>0?Math.min(30+g.boost,Math.sqrt(2*8*d)):0}
-function finish(win,why){const g=G;if(g.phase==='over')return;g.phase='over';g.overT=0;g.result={win,why};lowMusic(false);if(AE)AE.stop(1.2);snd(win?'pass':'fail');
- if(win)for(let i=0;i<110;i++)g.conf.push({x:rnd()*W,y:-20-rnd()*300,vx:(rnd()-.5)*60,vy:60+rnd()*140,c:['#ffd23f','#35e08a','#4cc9f0','#ff5d8f','#fff'][(rnd()*5)|0],w:4+rnd()*5});
- else g.shake=.5}
+
+/* ---------- played moments (v3): the car does the thing; the world judges it ----------
+ Stop scenes (bus, crosswalk, flagger = stop_full; yellow light = stop_line; 4-way = wait_turn): the scene wakes when the stop point is within `trig` metres.
+ The car must reach speed 0 before the hazard line (hz) and stay at 0 for `hold` seconds (x0.9 per level); then the scene clears (bus lights off, kids across, flagger SLOW, light green, other car gone).
+ Past the stop point without having stopped = late (wrong but safe, -15), if the car still stops before hz. Reaching hz before the scene clears = crash.
+ Siren: right lane (x > 2.4) and speed under 1 when the ambulance passes (it drives in the middle lane): middle lane = crash, anything else = wrong but safe.
+ Cyclist: 2.4 m or more between the car and the rider at the pass (3 feet), or slowed behind it for 1.4 s; 1.9 to 2.4 m = wrong but safe; under 1.9 m = crash.
+ Red curb, blue curb, hydrant: do not stop inside the zone; a stop of 1 s = ticket (-20), a stop of 4 s = a car behind hits you (crash).
+ White, yellow, green curb: a coin moment: stop beside the curb (right lane) for 1 s = +30; stay longer than the curb allows = -15. Never a crash. */
+const K_STOP={bus:{off:7,haz:4,hold:2.4},cross:{off:8,haz:4.5,hold:1.8},flag:{off:8,haz:5,hold:2.2},yellow:{off:11.5,haz:8,hold:2.8},'4way':{off:11.5,haz:8,hold:3.2}};
+const PARK_MAX={white:4,yellow:7,green:9};
+function spawnPlay(ui){const g=G,r=RULES[ui],act=actOf(r),k=r.k,v=g.cruise,SP=70+1.8*v;
+ const S=g.S={play:1,ru:ui,kind:k,vi:r.sv||0,cv:r.cv,act,age:0,on:false,cleared:false,stopT:0,prog:0,stoppedOnce:false,late:false,pen:false,done:false,crashed:false,lv:-1,lights:true,tHit:99,hitT:undefined,sd:1,pxl:0,rz:-85,trig:34+1.4*v,vz:0,W:0};
+ if(k==='cross'&&rnd()<.4)S.vi=1;
+ if(k==='amb'){S.W=6.5*lvTS(g.level);S.az0=g.dist-85;S.az=S.az0;S.vi=r.sv||0}
+ else if(k==='bike'){S.bl=g.lane;S.vz=6;S.az0=g.dist+72;S.az=S.az0;S.minDx=99;S.slowT=0;S.lx=0}
+ else{S.az0=g.dist+SP;S.az=S.az0}
+ if(K_STOP[k]){S.cfg=K_STOP[k];S.hold=S.cfg.hold*lvTS(g.level)}
+ if(act==='no_stop_here'||(k==='hydrant'))S.noStop=1;
+ if(k==='curb'&&act!=='no_stop_here'){S.park=1;S.parkT=0;S.paid=false;S.over=false}
+ if(k==='curb'&&act==='no_stop_here')S.noStop=1;
+ if(S.cfg&&(k==='yellow'||k==='4way'||(k==='cross'&&S.vi===1))){S.gap=1;g.gaps.push([S.az-8,S.az+8])}
+ g.gaps=g.gaps.filter(x=>x[1]>g.dist-60);
+ g.phase='play';g.pt=0;g.played++;g.idleT=0}
+function wrongSafe(S,coins,msg){const g=G;if(S.pen)return;S.pen=true;g.streak=0;addCoins(coins);
+ g.toast={t:0,head:coins+' coins',txt:msg||RULES[S.ru].short};pop(coins+' coins',CX+g.carX*PX,GY-130,'#ff6b6b',24);snd('coinloss');if(coins<=-20)snd('hit',false)}
+function finishPlay(S){const g=G;if(S.done)return;S.done=true;g.done++;
+ if(S.crashed){}
+ else if(S.pen||(S.park&&!S.paid)){g.log.push('y');g.streak=0}
+ else{g.log.push('g');g.right++;g.streak++;g.bestStreak=Math.max(g.bestStreak,g.streak);g.popS=1;
+  if(!S.paid){addCoins(C_OK);pop('Nice! +'+C_OK,CX+g.carX*PX,GY-150,'#7dffb0',26);[0,1,2].forEach(i=>snd('coin',i,0,i*.07))}}
+ if(AE)AE.setLayer(layerNow());
+ if(g.phase==='play')enterDrive(1.3)}
+function doCrash(S,rule,why){const g=G;if(g.phase==='crash')return;rule=rule||RULES[S.ru];g.lives--;g.crashes++;addCoins(C_CRASH);g.streak=0;
+ if(S&&!S.done){S.done=true;S.crashed=true;S.hitT=S.age;g.done++}else if(S){S.crashed=true;S.hitT=S.age}
+ g.log.push('r');g.phase='crash';g.cc={t:0,rule,why:why||'',final:g.lives<=0,card:false,ct:0};g.lastCrash={rule,why:why||''};
+ g.shake=1.3;g.spin=.5;flash('#ff2a2a',.6);verdict('CRASH!','#ff4d4d',64);pop(C_CRASH+' coins',CX,GY-250,'#ff6b6b',26);snd('hit',true);snd('life',0,0,.3);if(navigator.vibrate)navigator.vibrate(60);
+ g.toast=null;if(AE)AE.setLayer(0)}
+function closeCrash(){const g=G;lowMusic(false);g.S=null;g.cc=null;g.verdict=null;g.v=0;enterDrive(1.6)}
+function stepStop(S){const g=G,c=S.cfg,sp=S.az-c.off,hz=S.az-c.haz,d=g.dist,v=g.v;
+ if(!S.on&&sp-d<=S.trig){S.on=true;S.onT=S.age}
+ if(!S.on)return;
+ if(!S.cleared){
+  if(v<.3&&d<=hz){S.stopT+=DT;S.stoppedOnce=true}else S.stopT=0;
+  S.prog=Math.max(S.prog,S.stopT);
+  if(S.stopT>=S.hold){S.cleared=true;S.clearT=S.age;snd('tick')}
+  if(!S.late&&!S.stoppedOnce&&d>sp+.35&&v*v/(2*DEC)<hz-d-.2){S.late=true;wrongSafe(S,C_BAD,'Late. Stop before the line.  '+RULES[S.ru].short)}   /* late but still able to stop before the hazard = wrong but safe; a car that cannot stop crashes below */
+  if(d>=hz){doCrash(S,RULES[S.ru],'');return}}
+ if(S.cleared&&d>=S.az+3)finishPlay(S)}
+function stepAmb(S){const g=G,T=S.W;
+ if(!S.judged&&S.age>=T+.15){S.judged=true;const x=g.carX;
+  if(Math.abs(x)<1.9){doCrash(S,RULES[S.ru],'The ambulance could not get past you.');return}
+  if(!(x>2.4&&g.v<1))wrongSafe(S,C_BAD,x>2.4?'Stop until it has passed.  '+RULES[S.ru].short:'Pull to the RIGHT and stop.  '+RULES[S.ru].short)}
+ if(S.judged&&S.age>=T+1.0)finishPlay(S)}
+function stepBike(S){const g=G;S.bx=(S.bl-1)*LN+S.lx+(S.leave?0:Math.sin(S.age*3)*.15);if(S.leave)S.lx+=4*DT;
+ const dz=S.az-g.dist,dx=Math.abs(g.carX-S.bx);
+ if(!S.leave){
+  if(dz<9&&dz>-3.5)S.minDx=Math.min(S.minDx,dx);
+  if(dz<2.8&&dz>-2.8&&dx<1.9){doCrash(S,RULES[S.ru],'You hit the cyclist.');return}
+  if(dz>2.8&&dz<18&&g.v<=S.vz+1.4)S.slowT+=DT;else S.slowT=0;
+  if(S.slowT>=1.4){S.leave=1;S.slowOK=1}
+  if(dz<-3.5){if(S.minDx<2.4)wrongSafe(S,C_BAD,'Too close. Leave 3 feet.  '+RULES[S.ru].short);finishPlay(S)}}
+ else if(S.lx>5)finishPlay(S)}
+function stepNoStop(S){const g=G,a=S.az,d=g.dist,inZ=d>=a-24&&d<=a+22;
+ if(inZ&&g.v<.3){S.stopT+=DT;
+  if(S.stopT>=1&&!S.pen)wrongSafe(S,-20,'No stopping here.  '+RULES[S.ru].short);
+  if(S.stopT>=4){doCrash(S,RULES[S.ru],'A car behind you could not stop in time.');return}}
+ if(d>a+22)finishPlay(S)}
+function stepPark(S){const g=G,a=S.az,d=g.dist,inZ=d>=a-18&&d<=a+10;
+ if(inZ&&g.v<.3&&g.carX>2.2){S.parkT+=DT;
+  if(S.parkT>=1&&!S.paid&&!S.over){S.paid=true;addCoins(C_OK);pop('Nice! +'+C_OK,CX+g.carX*PX,GY-150,'#7dffb0',26);[0,1,2].forEach(i=>snd('coin',i,0,i*.07))}
+  if(S.parkT>PARK_MAX[S.cv]&&!S.over){S.over=true;wrongSafe(S,C_BAD,'Too long.  '+RULES[S.ru].short)}}
+ if(d>a+10)finishPlay(S)}
+function stepPlay(){const g=G,S=g.S;if(!S||!S.play||S.done){if(g.phase==='play')enterDrive(1.3);return}
+ if(S.cfg)stepStop(S);else if(S.kind==='amb')stepAmb(S);else if(S.kind==='bike')stepBike(S);else if(S.park)stepPark(S);else stepNoStop(S)}
+/* a car that stands still in a lane for no reason is hit from behind: honk at 3 s, crash at 8 s */
+function updIdle(){const g=G,S=g.S;if(g.phase!=='drive'&&g.phase!=='play'){g.idleT=0;g.honked=false;return}
+ let legit=false;
+ if(g.phase==='play'&&S&&S.play&&!S.done){
+  if(S.cfg&&S.on&&!S.cleared)legit=true;
+  else if(S.kind==='amb'&&S.age<S.W+2.2)legit=true;
+  else if(S.park&&g.dist>=S.az-18&&g.dist<=S.az+10&&g.carX>2.2&&!S.over)legit=true;
+  else if(S.noStop&&g.dist>=S.az-24&&g.dist<=S.az+22)legit=true}
+ if(g.v<.3&&!legit){g.idleT+=DT;
+  if(g.idleT>=IDLE_HONK&&!g.honked){g.honked=true;snd('honk');g.toast={t:0,head:'Keep moving',txt:'Cars are waiting behind you.'}}
+  if(g.idleT>=IDLE_HIT){g.idleT=0;g.honked=false;doCrash(S&&S.play?S:null,REAR,'A car behind you did not expect you to stop.')}}
+ else{g.idleT=0;g.honked=false}}
+function levelClear(){const g=G;g.phase='lvclear';g.pt=0;g.bank+=g.coins;g.cleared=g.level;g.toast=null;lowMusic(false);snd('pass');
+ for(let i=0;i<90;i++)g.conf.push({x:rnd()*W,y:-20-rnd()*300,vx:(rnd()-.5)*60,vy:60+rnd()*140,c:['#ffd23f','#35e08a','#4cc9f0','#ff5d8f','#fff'][(rnd()*5)|0],w:4+rnd()*5})}
+const ADS=[['Your driving school here','Lessons that stick. (fake sponsor)'],['Acme Tire and Brake','Stops on a dime. (made-up brand)'],['Sample Insurance Co.','Rates so low they are not real.'],['Maple Street Auto Wash','Shiny car, fake coupon. (not a real shop)']];
+function startAd(after){const g=G;g.ad={t:0,after,spon:ADS[g.adN++%ADS.length]};g.phase='ad';g.res=null;g.q=null;g.S=null;lowMusic(true);if(DEV)window.__adStart={after,runT:g.runT}}
+function endAd(){const g=G,ad=g.ad;if(DEV)(window.__adLog=window.__adLog||[]).push({after:ad.after,sec:+ad.t.toFixed(2)});g.ad=null;lowMusic(false);
+ if(ad.after==='level'){startLevel(g.level+1,false);snd('tick')}
+ else{g.lives=1;g.extraUsed=true;g.phase='crash';g.cc={t:2,rule:g.lastCrash.rule,why:g.lastCrash.why,final:false,card:true,ct:0,fromAd:1};lowMusic(true);snd('heal')}}
+function endGame(win,why){const g=G;if(g.mode==='end')return;g.mode='end';g.endT=0;g.result={win,why};g.phase='over';g.cc=g.cc&&!win?g.cc:null;lowMusic(false);if(AE)AE.stop(1.2);snd(win?'pass':'fail');
+ if(win)for(let i=0;i<110;i++)g.conf.push({x:rnd()*W,y:-20-rnd()*300,vx:(rnd()-.5)*60,vy:60+rnd()*140,c:['#ffd23f','#35e08a','#4cc9f0','#ff5d8f','#fff'][(rnd()*5)|0],w:4+rnd()*5});else g.shake=.5}
 function pedX(S){return clamp((S.age-S.tHit+1.2)*2.2,-6.2,6.2)}
 function updScene(){const S=G.S;if(!S)return;S.age+=DT;
  if(S.kind==='amb'){S.rz=S.age<S.W?-85+83*(S.age/S.W):-2+17*(S.age-S.W);S.az=G.dist+S.rz}else S.az=S.az0+S.vz*S.age;
  if(S.lv>=0)S.lv+=DT;const z=S.az-G.dist;
- if((z<-22&&G.phase!=='quiz')||z>400||(S.kind==='amb'&&S.rz>140))G.S=null}
-function updObjs(){const g=G,ok=g.phase==='calm'||g.phase==='teach'||g.phase==='res';
- for(const o of g.objs){o.age+=DT;if(o.fade!==undefined)o.fade-=DT*2.5;if(o.hit){o.x+=o.vx*DT;o.rot+=o.vr*DT}
+ if((z<-(S.play?45:22)&&G.phase!=='quiz'&&S.kind!=='amb')||z>400||(S.kind==='amb'&&S.rz>140))G.S=null}   /* a played scene stays 45 m behind so the judge sees the pass (the no-stop zone ends 22 m past the anchor) */
+function updObjs(){const g=G,ok=g.phase==='drive'||g.phase==='play'||g.phase==='res';
+ for(const o of g.objs){o.age+=DT;if(o.fade!==undefined)o.fade-=DT*2.5;
   const z=o.wz-g.dist;
-  if(ok&&!o.dead&&o.fade===undefined&&!o.hit&&z<2.2&&z>-1.6&&Math.abs(g.carX-o.x)<1.5){
-   if(o.t==='coin'){o.dead=1;g.score+=10;snd('coin',g.coinN++);pop('+10',CX+g.carX*PX,GY-90,'#ffd23f',16)}
-   else if(g.phase!=='res'){o.hit=1;o.vx=(o.x>=g.carX?1:-1)*9;o.vr=(o.x>=g.carX?1:-1)*5;o.rot=0;g.v*=.5;g.boost=0;g.shake=.5;g.score=Math.max(0,g.score-50);pop('BUMP -50',CX,GY-140,'#ff9f43',24);snd('hit',false)}}}
+  if(ok&&!o.dead&&o.fade===undefined&&z<2.2&&z>-1.6&&Math.abs(g.carX-o.x)<1.5){o.dead=1;addCoins(1);snd('coin',g.coinN++);pop('+1',CX+g.carX*PX,GY-90,'#ffd23f',18)}}
  g.objs=g.objs.filter(o=>!o.dead&&(o.fade===undefined||o.fade>0)&&o.wz-g.dist>-10&&Math.abs(o.x)<16)}
 function updFx(){const g=G;g.shake*=.9;if(g.flash){g.flash.a-=DT*1.8;if(g.flash.a<=0)g.flash=null}
  g.pops.forEach(p=>{p.t+=DT});g.pops=g.pops.filter(p=>p.t<1.1);if(g.verdict){g.verdict.t+=DT;if(g.verdict.t>1.6)g.verdict=null}
+ if(g.toast){g.toast.t+=DT;if(g.toast.t>2.5)g.toast=null}
+ if(g.banner){g.banner.t+=DT;if(g.banner.t>2.8)g.banner=null}
+ if(g.hint){g.hint.t+=DT;if(g.hint.t>3)g.hint=null}
  if(g.lock){g.lock.tt+=DT;if(g.lock.tt>2.2)g.lock=null}
  g.popS*=.9;g.sirenT=Math.max(0,g.sirenT-DT);g.copied=g.copied>0?Math.max(0,g.copied-DT):Math.min(0,g.copied+DT);
  for(const c of g.conf){c.x+=c.vx*DT;c.y+=c.vy*DT;c.vy+=40*DT}g.conf=g.conf.filter(c=>c.y<H+20)}
-/* Early lock-in (speedrun lever): commit inside the fast window (first 40 percent) and stay put 0.45 s -> the rest of the window runs 3x fast.
-   Real time saved = (rest of window) x 2/3. The run clock counts real time (DT / warp). Any new input cancels the warp. */
-function step(){const g=G;let n=1;g.warp=1;g.pd=g.dist;g.px=g.carX;
- if(g.mode==='run'&&g.phase==='quiz'&&g.q&&g.q.move>=0&&qr(g.q.move,g.q)<FW&&g.q.t>=g.q.move+.45){n=3;g.warp=3}
- if(n===3&&!g.warpOn)snd('riser');g.warpOn=n===3?1:0;
- for(let i=0;i<n;i++){stepOne();if(i<n-1&&G.phase!=='quiz')break}}
+function step(){const g=G;g.pd=g.dist;g.px=g.carX;stepOne()}
 function stepOne(){const g=G;g.t+=DT;
  if(g.mode==='title'){g.v=13;g.dist+=g.v*DT;g.carX=Math.sin(g.t*.8)*.6;return}
  if(g.mode==='end'){g.endT+=DT;updFx();return}
- g.dec=30;let vT=0;const base=22+8*Math.max(0,g.mi)/12;
- g.boost=Math.max(0,g.boost-6.5*DT);if(g.phase!=='over')g.runT+=DT/g.warp;
+ g.dec=30;let vT=0;const cr=g.cruise;
+ if(g.phase!=='ad')g.runT+=DT;
+ if(ptr&&!ptr.cardAtDown&&(!ptr.moved||ptr.hold>=BRAKE_DELAY))ptr.hold+=DT;
+ g.braking=!!(ptr&&!ptr.cardAtDown&&ptr.hold>=BRAKE_DELAY&&(g.phase==='drive'||g.phase==='play'));
  switch(g.phase){
-  case'calm':g.pt+=DT;vT=base+g.boost;if(g.pt>=g.calmT){if(g.pendingQuiz)startQuiz();else nextMoment()}break;
-  case'teach':g.pt+=DT;vT=CRAWL;g.dec=16;if(g.td===undefined){if(g.pt>=TEACH_MAX)closeTeach()}else{g.td+=DT;if(g.td>=.3)startQuiz()}break;
-  case'quiz':g.q.t+=DT;vT=g.vq;if(g.q.t>=g.q.W)resolve();break;
+  case'drive':vT=g.braking?0:cr;g.dec=g.braking?DEC:8;g.lvT+=DT;g.gapT-=DT;if(g.gapT<=0)nextMoment();break;
+  case'teach':g.pt+=DT;vT=CRAWLV;g.dec=16;if(g.td!==undefined){g.td+=DT;if(g.td>=.3)beginMoment()}break;
+  case'play':vT=g.braking?0:cr;g.dec=g.braking?DEC:8;g.lvT+=DT;stepPlay();break;
+  case'quiz':g.q.t+=DT;vT=CRAWLV;g.dec=12;if(g.q.t>=g.q.tot)resolve();break;
   case'res':vT=stepRes();break;
-  case'finale':vT=stepFinale();break;
-  case'over':g.overT+=DT;g.dec=20;if(g.overT>=(g.result.win?1.5:1)){g.mode='end';g.endT=0}break}
- g.v+=clamp(vT-g.v,-g.dec*DT,14*DT);
+  case'crash':{const c=g.cc;c.t+=DT;vT=0;g.dec=40;
+   if(c.final){if(c.t>=1.4)endGame(false,'lives')}
+   else{if(!c.card&&c.t>=.9){c.card=true;c.ct=0;lowMusic(true);snd('card')}
+    if(c.card){c.ct+=DT;if(c.dt!==undefined){c.dt+=DT;if(c.dt>=.3)closeCrash()}}}break}
+  case'lvclear':g.pt+=DT;vT=3;g.dec=10;if(g.pt>=3.4){if(g.level>=MAXL)endGame(true,'done');else startAd('level')}break;
+  case'ad':g.ad.t+=DT;vT=0;g.dec=30;if(g.ad.t>=AD_SEC)endAd();break}
+ g.v+=clamp(vT-g.v,-g.dec*DT,ACC*DT);
+ if(g.v<.01&&vT===0)g.v=0;
  g.dist+=g.v*DT;
  const tx=g.xo!==null?g.xo:(g.lane-1)*LN,dx=tx-g.carX;g.carX+=dx*(1-Math.exp(-DT*(g.xo!==null?5:15)));g.tilt=lerp(g.tilt,clamp(dx*.14,-.22,.22),.3);g.spin*=.93;
- updScene();updObjs();updFx()}
+ updScene();updObjs();updFx();updIdle()}
 
 /* ---------- share text and input ---------- */
-const roastOf=m=>{const r=RULES[m.rule];return(r.roasts&&r.roasts[m.vi])||r.roast};
-/* rule lists for the end card: mastered = a right re-ask; to practise = a wrong answer that was not repaired by a right re-ask */
 function ruleLists(){const g=G,mastered=[],practise=[];
  Object.keys(g.rres).forEach(k=>{const r=g.rres[k];if(r.a2===true)mastered.push(+k);else if(r.a2===false||r.a1===false)practise.push(+k)});return{mastered,practise}}
-function shareText(){const g=G,sq={g:'\u{1F7E9}',y:'\u{1F7E8}',r:'\u{1F7E5}'},row=Array.from({length:12},(_,i)=>sq[g.log[i]]||'⬛').join('');
- const win=g.result&&g.result.win,roast=g.missFirst?roastOf(g.missFirst):'Clean run. Nothing to roast.',rl=ruleLists();
- return'Green Light: Rush Hour '+DAY+(g.calm?' (calm run)':'')+'\n'+(win?'PASSED ':'SUSPENDED ')+g.right+'/12  '+fmtT(g.runT)+'  '+g.score+' pts\n'+row+'\nRules locked in: '+rl.mastered.length+'/6\n'+roast+'\n'+LINK}
+const totalCoins=()=>G.bank+(G.cleared===G.level?0:G.coins);
+function shareText(){const g=G,sq={g:'\u{1F7E9}',y:'\u{1F7E8}',r:'\u{1F7E5}'},win=g.result&&g.result.win,rows=[];
+ const sqs=g.log.map(c=>sq[c]||'⬛');for(let i=0;i<sqs.length;i+=10)rows.push(sqs.slice(i,i+10).join(''));
+ return'Green Light: Rush Hour '+DAY+(g.calm?' (calm run)':'')+'\n'+(win?'CLEARED all '+MAXL+' levels':'Level '+g.level+' reached')+'  coins '+totalCoins()+'  lives left '+Math.max(0,g.lives)+'  '+fmtT(g.runT)+(g.extraUsed?'  (extra life used)':'')+'\n'+rows.join('\n')+'\n'+LINK}
 function fallbackCopy(s,done){const t=document.createElement('textarea');t.value=s;t.style.cssText='position:fixed;left:-999px;top:0';document.body.appendChild(t);t.select();
  let ok=false;try{ok=document.execCommand('copy')}catch(e){}t.remove();done(ok)}
 function copyResult(){const s=shareText(),done=ok=>{G.copied=ok?1.6:-1.6};if(DEV)window.__lastCopy=s;snd('copy');
  try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(()=>done(true),()=>fallbackCopy(s,done));return}}catch(e){}fallbackCopy(s,done)}
-function setLane(l,confirm){const g=G;if(g.mode!=='run'||(l===g.lane&&!confirm))return;
- if(g.phase==='quiz'){if(g.q.t<0)return;if(l!==g.lane)snd('swipe');g.lane=l;g.q.move=g.q.t}
- else if(g.phase==='calm'||g.phase==='teach'||g.phase==='finale'||(g.phase==='res'&&g.res.stage===2)){if(l!==g.lane)snd('swipe');g.lane=l}}
-/* a tap closes the open card (teach card after 0.7 s, miss card after 0.6 s); otherwise a tap jumps to that lane */
-function tapAt(x,y){const g=G;if(g.mode!=='run')return;
- if(g.phase==='teach'){if(g.pt>=TEACH_MIN)closeTeach();return}
- if(g.phase==='res'&&g.res&&g.res.card){if(g.res.dt===undefined&&g.res.cardT>=.6){g.res.dt=0;snd('tick')}return}
- setLane(x<W/3?0:x>2*W/3?2:1,true)}
+function setLane(l){const g=G;if(g.mode!=='run'||l===g.lane)return;
+ if(g.phase==='quiz'){if(g.q.t<.3)return;snd('swipe');g.lane=l;g.q.move=g.q.t}
+ else if(g.phase==='drive'||g.phase==='play'||g.phase==='teach'||(g.phase==='res'&&g.res.stage===2)){snd('swipe');g.lane=l}}
+function cardOpen(){const g=G;if(g.mode!=='run')return null;if(g.phase==='teach')return'teach';if(g.phase==='crash'&&g.cc&&g.cc.card)return'crash';if(g.phase==='res'&&g.res&&g.res.card)return'miss';return null}
+/* a tap closes the open card (teach after 0.7 s, crash and miss cards after 0.6 s); it only counts when the finger went down while the card was open */
+function tapCard(){const g=G,c=cardOpen();
+ if(c==='teach'){if(g.pt>=TEACH_MIN)closeTeach()}
+ else if(c==='crash'){if(g.cc.dt===undefined&&g.cc.ct>=.6){g.cc.dt=0;snd('tick')}}
+ else if(c==='miss'){if(g.res.dt===undefined&&g.res.cardT>=.6){g.res.dt=0;snd('tick')}}}
 let ptr=null;
 function lp(e){const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]}
 const hit=(b,x,y)=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h;
-/* end card buttons act on pointerup (a real touch "activation": clipboard and audio need it on iOS); a stray tap elsewhere does nothing */
-cv.addEventListener('pointerdown',e=>{e.preventDefault();audio();if(ptr&&ptr.id!==e.pointerId&&performance.now()-ptr.t<1500)return;  /* one finger at a time: a second finger or a palm is ignored (a stale one expires) */
- try{cv.setPointerCapture(e.pointerId)}catch(_){}const[x,y]=lp(e);ptr={id:e.pointerId,t:performance.now(),x0:x,y0:y,ox:x,fired:0};
- if(hit(MUTEB,x,y)){ptr.fired=1;setMuted(!MUTED);return}   /* mute button, top right, every screen */
- if(G.mode==='title'){if(hit(CALMB,x,y)){ptr.fired=1;CALM=!CALM;store.set(CK,CALM?'1':'0');G.calm=CALM;snd('tick');return}startRun();ptr.fired=1}else if(G.mode==='end')ptr.fired=1});
+/* start of a touch: Hold = brake (after 0.1 s without a swipe); Swipe = one lane per 24 px. End card buttons act on pointerup (iOS clipboard and audio need a real touch activation). */
+cv.addEventListener('pointerdown',e=>{e.preventDefault();audio();if(ptr&&ptr.id!==e.pointerId&&performance.now()-ptr.t<1500)return;
+ try{cv.setPointerCapture(e.pointerId)}catch(_){}const[x,y]=lp(e);ptr={id:e.pointerId,t:performance.now(),x0:x,y0:y,ox:x,moved:0,hold:0,fired:0,cardAtDown:!!cardOpen()};
+ if(hit(MUTEB,x,y)){ptr.fired=1;ptr.cardAtDown=true;setMuted(!MUTED);return}
+ if(G.mode==='title'){if(hit(CALMB,x,y)){ptr.fired=1;CALM=!CALM;store.set(CK,CALM?'1':'0');G.calm=CALM;snd('tick');return}startRun();ptr.fired=1;ptr.cardAtDown=true}else if(G.mode==='end'){ptr.fired=1;ptr.cardAtDown=true}});
 cv.addEventListener('pointermove',e=>{if(!ptr||e.pointerId!==ptr.id)return;const[x]=lp(e),dx=x-ptr.ox;
- if(!ptr.fired&&Math.abs(dx)>=24){ptr.fired=1;ptr.ox=x;setLane(clamp(G.lane+(dx>0?1:-1),0,2),false)}});  /* one lane per swipe */
+ if(Math.abs(dx)>=24){ptr.moved=1;ptr.ox=x;if(!ptr.cardAtDown)setLane(clamp(G.lane+(dx>0?1:-1),0,2))}});
 cv.addEventListener('pointerup',e=>{audio();if(!ptr||e.pointerId!==ptr.id)return;const[x,y]=lp(e);
- if(G.mode==='end'){if(Math.abs(x-ptr.x0)<20&&Math.abs(y-ptr.y0)<20){if(hit(COPY,x,y))copyResult();else if(hit(RUN,x,y)&&G.endT>.8)startRun()}ptr=null;return}
- if(!ptr.fired&&Math.abs(x-ptr.x0)<14)tapAt(x,y);ptr=null});
+ if(G.mode==='end'){if(Math.abs(x-ptr.x0)<20&&Math.abs(y-ptr.y0)<20&&G.endT>.8){
+   if(hit(COPY,x,y))copyResult();
+   else if(hit(RUN,x,y))startRun();
+   else if(!G.result.win&&!G.extraUsed&&hit(ADB,x,y)){G.mode='run';G.result=null;G.shake=0;musicOn();startAd('life')}}   /* MINI is a disabled button: COMING SOON, no action */
+  ptr=null;return}
+ if(ptr.cardAtDown&&!ptr.moved&&Math.abs(x-ptr.x0)<14&&cardOpen())tapCard();ptr=null});
 cv.addEventListener('pointercancel',e=>{if(ptr&&e.pointerId===ptr.id)ptr=null});
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 
@@ -494,12 +525,13 @@ function drawWorld(){const g=G,S=g.S,d=g.dist;
  gq(-5,5,-60,9999,'#3a404d');
  const b12=Math.floor(d/12);for(let k=-1;k<24;k++)if((b12+k)&1){const a=(b12+k)*12-d;gq(-5,5,a,a+12,'#3f4655')}
  gq(-5.08,-4.92,-60,9999,'#e8e3d3');gq(4.92,5.08,-60,9999,'#e8e3d3');gq(-4.7,-4.55,-60,9999,'#f2f2f2');gq(4.55,4.7,-60,9999,'#f2f2f2');
- if(S&&S.kind==='curb')gq(4.95,5.8,S.az-26-d,S.az+22-d,S.vi===1?'#f7f7f7':'#d62d20');
+ if(S&&S.kind==='curb')gq(4.95,5.8,S.az-26-d,S.az+22-d,CURBC[S.cv]);
  for(const x of g.gaps)gq(-60,60,x[0]-d,x[1]-d,'#3a404d');
  const n9=Math.floor(d/9);for(let k=-1;k<24;k++){const a=(n9+k)*9;if(gapHit(a,a+4.5))continue;gq(-1.68,-1.52,a-d,a+4.5-d,'#f4f4f4');gq(1.52,1.68,a-d,a+4.5-d,'#f4f4f4')}
  if(S){const z=S.az-d;
   if(S.kind==='cross'&&S.vi===0)for(let x=-4.6;x<4.5;x+=1)gq(x,x+.55,z-2.5,z+2.5,'#f4f4f4');
-  if(S.gap)gq(-4.8,4.8,z-9.6,z-9.1,'#fff')}
+  if(S.gap)gq(-4.8,4.8,z-9.6,z-9.1,'#fff');
+  if(S.play&&S.cfg&&!S.gap)gq(-4.8,4.8,z-S.cfg.off+2.2,z-S.cfg.off+2.7,'rgba(255,255,255,.9)')}
  if((g.phase==='quiz'&&g.q&&g.q.t>=0)||g.phase==='res'){const q=g.q,R=g.res,glow=R&&!R.ok&&R.card;if(q)for(let i=0;i<3;i++){const sel=i===g.lane;
   if(glow)gq((i-1)*LN-1.5,(i-1)*LN+1.5,-60,300,i===q.cl?'rgba(60,255,130,'+(.45+.2*Math.sin(g.t*7))+')':'rgba(20,30,50,.25)');   /* the right lane glows after a miss */
   else gq((i-1)*LN-1.5,(i-1)*LN+1.5,-60,300,'rgba('+BCA[i]+','+(sel?.28+.08*Math.sin(g.t*8):.12)+')')}}}
@@ -550,8 +582,10 @@ function bike(t){const sw=Math.sin(t*6)*.12;rc(-.07,0,.14,.85,'#222');rc(-.04,.5
  cx.fillStyle='#e84393';cx.beginPath();cx.arc(0,-1.95,.25,Math.PI,0);cx.fill()}
 function sideCar(col,br){rc(-1.7,.35,3.4,.8,col);pg([[-1,1.15],[-.6,1.75],[.7,1.75],[1.1,1.15]],col);pg([[-.85,1.2],[-.55,1.65],[0,1.65],[0,1.2]],'#bfe4ff');pg([[.1,1.2],[.1,1.65],[.62,1.65],[.95,1.2]],'#bfe4ff');
  ci(-1,.38,.38,'#111');ci(1,.38,.38,'#111');ci(-1,.38,.16,'#aaa');ci(1,.38,.16,'#aaa');rc(1.6,.7,.12,.2,'#fff3a0');rc(-1.72,.7,.12,.22,br?'#ff2020':'#a02820')}
-function signPole(kind){rc(-.06,0,.12,2.8,'#8a8f98');
- if(kind==='curb'){ci(0,3.2,.75,'#d62d20');ci(0,3.2,.6,'#fff');pg([[-.45,2.8],[-.3,2.72],[.45,3.6],[.3,3.68]],'#d62d20');rc(-.12,2.95,.24,.5,'#222')}
+function hydrant(){rc(-.4,0,.8,.2,'#8f1d14');rc(-.28,.2,.56,.8,'#d62d20');rc(-.4,.95,.8,.16,'#b02a22');ci(0,1.12,.3,'#d62d20');rc(-.55,.4,.27,.24,'#b02a22');rc(.28,.4,.27,.24,'#b02a22');rc(-.1,1.38,.2,.1,'#8f1d14');ci(0,.6,.1,'#f7c6c0')}
+function signPole(kind){rc(-.06,0,.12,2.8,'#8a8f98');if(kind==='red')kind='curb';
+ if(kind==='yellow'||kind==='green'||kind==='blue'){rc(-.7,2.5,1.4,1.4,'#fff');rc(-.6,2.6,1.2,1.2,CURBC[kind]);ci(0,3.2,.2,'#fff')}
+ else if(kind==='curb'){ci(0,3.2,.75,'#d62d20');ci(0,3.2,.6,'#fff');pg([[-.45,2.8],[-.3,2.72],[.45,3.6],[.3,3.68]],'#d62d20');rc(-.12,2.95,.24,.5,'#222')}
  else if(kind==='white'){rc(-.7,2.5,1.4,1.4,'#f7f7f7');rc(-.6,2.6,1.2,1.2,'#1b6fd6');ci(0,3.45,.18,'#fff');rc(-.2,2.75,.4,.55,'#fff')}
  else if(kind==='work')pg([[0,4.1],[.9,3.2],[0,2.3],[-.9,3.2]],'#ff8c1a');
  else pg([[0,4.1],[.9,3.2],[0,2.3],[-.9,3.2]],'#c6f432')}
@@ -565,7 +599,7 @@ function coinD(o){const w=Math.abs(Math.cos(G.t*5+o.wz));ci(0,.9,.48,'#b8860b');
 function crossCar(S,z,dir,fn,col,A){let x=fn(S.age),rot=0,al=A;
  if(S.hitT!==undefined&&S.age>S.hitT){const k=S.age-S.hitT;x=fn(S.hitT)+dir*k*13;rot=k*5*dir;al=Math.max(0,A-k*.6)}
  at(x,z,()=>{cx.scale(dir,1);sideCar(col,S.age<S.tHit-1)},al,rot)}
-function drawScene(S){const g=G,d=g.dist,z=S.az-d,A=Math.min(1,S.age/.4),t=S.age,R=g.res,win=R&&R.ok,lv=S.lv,k=S.kind;
+function drawQScene(S){const g=G,d=g.dist,z=S.az-d,A=Math.min(1,S.age/.4),t=S.age,R=g.res,win=R&&R.ok,lv=S.lv,k=S.kind;
  /* scene props are drawn 1.4x so they read at distance on a phone (cartoon scale) */
  const at=(x,z,fn,a,rot,s)=>at0(x,z,()=>{const q=s||1.4;cx.scale(q,q);fn()},a,rot);
  if(k==='bus'){const oz=lv>=0?60*lv*lv:0;at(0,z+oz,()=>bus(S),A);at(5.9,z-3,()=>person('#e84393',t,0,'#222',.8),A);at(6.8,z-3.5,()=>person('#3498db',t,0,'#a0522d',.75),A)}
@@ -579,35 +613,58 @@ function drawScene(S){const g=G,d=g.dist,z=S.az-d,A=Math.min(1,S.age/.4),t=S.age
   at(ox,z,()=>flagger(win&&R.went,t),A)}
  else if(k==='bike'){const bx=R&&!win&&lv>=0?S.sd*6*lv:Math.sin(t*3)*.15;at(bx,z,()=>{cx.scale(1.3,1.3);bike(t)},A);
   if(win&&Math.abs(z)<9)at(-LN/2,z,()=>{rc(-1.6,.3,3.2,.08,'#7dffb0');cx.font='bold 0.9px '+FONT;cx.textAlign='center';cx.fillStyle='#7dffb0';cx.fillText('3 FT+',0,-.6)})}
- else if(k==='curb'){const kk=S.vi===1?'white':'curb';at(6.4,z-24,()=>signPole(kk),A);at(6.4,z-6,()=>signPole(kk),A);
-  if(S.vi===1)at(6.6,z-12,()=>person('#3498db',t,0,'#a0522d',1),A)}}
+ else if(k==='curb'){const kk=S.cv;at(6.4,z-24,()=>signPole(kk),A);at(6.4,z-6,()=>signPole(kk),A);
+  if(kk==='white'||kk==='yellow')at(6.6,z-12,()=>person('#3498db',t,0,'#a0522d',1),A)}
+ else if(k==='hydrant'){at(5.9,z-5,hydrant,A,0,2.4);at(5.9,z-20,hydrant,A,0,2.4)}}
 function drawObj(o){const z=o.wz-G.dist,A=Math.min(1,o.age/.35)*(o.fade!==undefined?Math.max(0,o.fade):1);
  if(o.t==='coin')at(o.x,z,()=>coinD(o),A);else at(o.x,z,()=>carRear(o.col,false,true),A,o.rot||0)}
 function drawPlayer(){const g=G,k=PX*1.15,bf=clamp(g.boost/20,0,1);cx.save();cx.translate(CX+g.carX*PX,GY);
  cx.fillStyle='rgba(0,0,0,.3)';cx.beginPath();cx.ellipse(0,4,1.4*k,.38*k,0,0,6.3);cx.fill();
  cx.rotate(g.tilt+g.spin*Math.sin(g.t*20));cx.scale(k,k);
  if(bf>.05){const fl=.5+Math.random()*.5;pg([[-.78,.45],[-.3,.45],[-.54,.45-fl*1.6*bf]],'#ff9f1c');pg([[.3,.45],[.78,.45],[.54,.45-fl*1.6*bf]],'#ff9f1c');pg([[-.66,.45],[-.42,.45],[-.54,.45-fl*bf]],'#fff3b0');pg([[.42,.45],[.66,.45],[.54,.45-fl*bf]],'#fff3b0')}
- carRear('#2b7de9',g.v<g.vq-1&&g.phase==='res'||g.dec>20&&g.v<5,false);rc(-.9,1.2,1.8,.1,'rgba(255,255,255,.4)');cx.restore()}
+ carRear('#2b7de9',g.braking||(g.dec>12&&g.v<5),false);rc(-.9,1.2,1.8,.1,'rgba(255,255,255,.4)');cx.restore();
+ if(g.braking){cx.save();RR(CX+g.carX*PX-34,GY+46,68,22,11);cx.fillStyle='rgba(229,56,59,.9)';cx.fill();T('BRAKE',CX+g.carX*PX,GY+57,15,'#fff','center');cx.restore()}}
 function drawSpeedLines(){const f=clamp((G.v*G.warp-27)/12,0,1);if(f<.03)return;cx.strokeStyle='rgba(255,255,255,'+(.55*f)+')';cx.lineWidth=2.5;
  for(let i=0;i<22;i++){const a=i*.2855+hash(i)*.2,ph=(G.t*1.8+hash(i+9))%1,r0=70+ph*ph*430,r1=r0+25+ph*90;
   cx.beginPath();cx.moveTo(CX+Math.cos(a)*r0,330+Math.sin(a)*r0*1.5);cx.lineTo(CX+Math.cos(a)*r1,330+Math.sin(a)*r1*1.5);cx.stroke()}}
 
-/* ---------- HUD, boards, cards ---------- */
+/* ---------- played scenes (v3): drawn from the same state the judge reads ---------- */
+function drawScene(S){if(!S.play)return drawQScene(S);
+ const g=G,d=g.dist,z=S.az-d,A=Math.min(1,S.age/.4),t=S.age,k=S.kind;
+ const at=(x,z,fn,a,rot,s)=>at0(x,z,()=>{const q=s||1.4;cx.scale(q,q);fn()},a,rot);
+ const hold=S.hold||1,p=S.cfg?clamp((S.prog-.35)/Math.max(.5,hold-.35),0,1):0,cl=S.cleared;
+ const hitK=S.hitT!==undefined?clamp((S.age-S.hitT)/.25,0,1):0;
+ if(k==='bus'){S.lights=!cl;
+  const kx=i=>!S.on?6.4+i*.9:cl?-5.4-i*.8:p<=0?4.0+i*1.0:lerp(4.0+i,-5.4-i*.8,p),mv=S.on&&!cl&&p>0?1:0;
+  at(kx(0),z+5.5,()=>person('#e84393',t,mv,'#222',.9),A);at(kx(1),z+6,()=>person('#3498db',t,mv,'#a0522d',.8),A);at(0,z,()=>bus(S),A)}
+ else if(k==='cross'){const px=!S.on?6.2:cl?-6.2:p<=0?4.4:lerp(4.4,-6.2,p),mv=S.on&&!cl&&p>0?1:0;
+  if(S.vi===0)at(5.9,z-10,()=>signPole('ped'),A);at(px,z,()=>person('#e84393',t,mv,'#3a2a1a',1.3),A)}
+ else if(k==='flag'){const ox=cl?4.8*ease((S.age-(S.clearT||S.age))/1):0;for(const x of[-4.2,-2.5,2.5,4.2])at(x,z-2,()=>cone(0),A);at(5.8,z-14,()=>signPole('work'),A);
+  at(ox,z,()=>flagger(cl,t),A)}
+ else if(k==='yellow'){const st=!S.on?'y':cl?'g':p>0?'r':'y';at(5.3,z-8,()=>signal(st,t),A,0,.9);at(-5.3,z-8,()=>signal(st,t),A,0,.9);
+  const f=cl?1:clamp(p,0,1),x=S.crashed?lerp(-9,g.carX,ease(hitK)):lerp(-9,9,f);
+  if((S.on&&p>0&&!cl)||S.crashed)at(x,z,()=>{cx.scale(1,1);sideCar('#e63946',false)},A)}
+ else if(k==='4way'){at(5.8,z-7.5,stopSign,A);at(-5.8,z-7.5,stopSign,A);
+  const side=S.vi===0?1:-1,f=cl?1:clamp(p,0,1),x=S.crashed?lerp(side*7,g.carX,ease(hitK)):(S.on?lerp(side*6.6,-side*9,f):side*9);
+  if(S.on||S.crashed)at(x,z,()=>{cx.scale(-side,1);sideCar('#2a9d8f',false)},A)}
+ else if(k==='amb'){if(S.rz>-4){const ax=S.crashed?lerp(0,g.carX,ease(hitK))*.5:0;at(ax,S.rz,()=>ambu(S.vi===1,t))}}
+ else if(k==='bike'){const bx=S.bx!==undefined?S.bx:(S.bl-1)*LN;at(bx,z,()=>{cx.scale(1.3,1.3);bike(t)},A);
+  if(!S.leave&&z>0&&z<30&&Math.abs(g.carX-bx)<2.2)at(bx,z,()=>{cx.font='bold 0.9px '+FONT;cx.textAlign='center';cx.fillStyle='#ff9f6b';cx.fillText('!',0,-3.2)})}
+ else if(k==='curb'){const kk=S.cv;at(6.4,z-24,()=>signPole(kk),A);at(6.4,z-6,()=>signPole(kk),A);
+  if((kk==='white'||kk==='yellow')&&!S.paid)at(6.6,z-12,()=>person('#3498db',t,0,'#a0522d',1),A)}
+ else if(k==='hydrant'){at(5.9,z-5,hydrant,A,0,2.4);at(5.9,z-20,hydrant,A,0,2.4)}}
+
+/* ---------- HUD, boards, cards (v3: text about 20 percent bigger than v2) ---------- */
 function fitT(s,x,y,mw,sz,col,al,st){cx.font=`bold ${sz}px ${FONT}`;const w=cx.measureText(s).width;T(s,x,y,w>mw?Math.max(12,sz*mw/w):sz,col,al,st)}
+function heart(x,y,sz,on){cx.save();cx.translate(x,y);cx.scale(sz,sz);cx.beginPath();cx.moveTo(0,5);cx.bezierCurveTo(-1,4,-10,-1,-10,-5);cx.bezierCurveTo(-10,-10,-2,-10,0,-5);cx.bezierCurveTo(2,-10,10,-10,10,-5);cx.bezierCurveTo(10,-1,1,4,0,5);
+ cx.fillStyle=on?'#ff3b55':'rgba(255,255,255,.18)';cx.fill();cx.lineWidth=1.5;cx.strokeStyle=on?'#fff':'rgba(255,255,255,.35)';cx.stroke();cx.restore()}
 function drawHUD(){const g=G;if(g.mode==='title')return;
- const gr=cx.createLinearGradient(0,0,0,72);gr.addColorStop(0,'rgba(5,10,30,.78)');gr.addColorStop(1,'rgba(5,10,30,0)');cx.fillStyle=gr;cx.fillRect(0,0,W,72);
- cx.save();cx.translate(16,22);const pk=1+g.popS*.6;cx.scale(pk,pk);T(g.streak>0?'x'+mu(g.streak).toFixed(1):'x1.0',0,0,26,g.streak>0?'#ffd23f':'#9fb3c8','left',4);cx.restore();
- T(g.streak>0?'STREAK '+g.streak:'NO STREAK',16,43,11,'#c7d6e6','left');
- T(fmtT(g.runT),CX,22,26,'#ffffff','center',4);
- for(let i=0;i<3;i++){const x=CX-24+i*24,on=i<g.strikes;cx.beginPath();cx.arc(x,45,8,0,6.3);cx.fillStyle=on?'#e5383b':'rgba(255,255,255,.15)';cx.fill();
-  if(on){cx.strokeStyle='#fff';cx.lineWidth=2.5;cx.beginPath();cx.moveTo(x-4,41);cx.lineTo(x+4,49);cx.moveTo(x+4,41);cx.lineTo(x-4,49);cx.stroke()}}
- T(String(g.score),326,22,26,'#fff','right',4);T(g.calm?'SCORE  CALM':'SCORE',326,43,11,g.calm?'#9fe8ff':'#c7d6e6','right');
- cx.fillStyle='rgba(255,255,255,.25)';cx.fillRect(30,57,310,3);
- for(let i=0;i<12;i++){const x=30+i*(310/11),c=g.log[i],hard=ROUTE[i]&&RULES[ROUTE[i].rule].hard;
-  cx.beginPath();cx.arc(x,58.5,i===g.mi?6:4.5,0,6.3);cx.fillStyle=c==='g'?'#2ecc71':c==='y'?'#f1c40f':c==='r'?'#e74c3c':'rgba(255,255,255,.35)';cx.fill();
-  if(i===g.mi||hard){cx.lineWidth=hard?1.5:2;cx.strokeStyle=hard?'#ff9f6b':'#fff';cx.stroke()}}
- T('DMV',366,58,11,'#ffd23f','center')}
-/* mute button, top right, on every screen; the choice is remembered */
+ const gr=cx.createLinearGradient(0,0,0,74);gr.addColorStop(0,'rgba(5,10,30,.82)');gr.addColorStop(1,'rgba(5,10,30,0)');cx.fillStyle=gr;cx.fillRect(0,0,W,74);
+ const lt='Level '+g.level+': '+g.coins+' / '+g.target;cx.font=`bold 21px ${FONT}`;const lw=cx.measureText(lt).width;T(lt,14,22,21,'#fff','left',4);T('coins',14+lw+5,24,14,'#ffd23f','left',3);
+ const f=clamp(g.coins/g.target,0,1);cx.fillStyle='rgba(255,255,255,.25)';RR(14,42,236,12,6);cx.fill();
+ if(f>0){cx.fillStyle='#ffd23f';RR(14,42,Math.max(10,236*f),12,6);cx.fill()}
+ for(let i=0;i<3;i++)heart(274+i*26,22,1.25,i<g.lives);
+ T((g.calm?'CALM ':'')+fmtT(g.runT),322,52,14,g.calm?'#9fe8ff':'#c7d6e6','right')}
 function drawMute(){cx.save();cx.translate(363,25);cx.beginPath();cx.arc(0,0,17,0,6.3);cx.fillStyle='rgba(5,10,30,.7)';cx.fill();cx.lineWidth=2;cx.strokeStyle='rgba(255,255,255,.75)';cx.stroke();
  cx.fillStyle='#fff';cx.beginPath();cx.moveTo(-9,-3.5);cx.lineTo(-4,-3.5);cx.lineTo(1,-8);cx.lineTo(1,8);cx.lineTo(-4,3.5);cx.lineTo(-9,3.5);cx.closePath();cx.fill();
  cx.lineWidth=2.2;cx.lineCap='round';
@@ -615,126 +672,162 @@ function drawMute(){cx.save();cx.translate(363,25);cx.beginPath();cx.arc(0,0,17,
  else{cx.strokeStyle='#fff';cx.beginPath();cx.arc(2,0,6,-.9,.9);cx.stroke();cx.beginPath();cx.arc(2,0,10,-.9,.9);cx.stroke()}
  cx.restore()}
 function exitOff(i){const g=G,R=g.res;if(!R)return 0;
- if(R.ok)return-ease((R.t-.35)/.45)*260;
- if(i===g.q.cl)return-(R.dt===undefined?0:ease(R.dt/.3))*260;   /* after a miss the right sign stays until the card is closed */
- if(i===R.lane)return-ease((R.t-1.4)/.4)*260;
- return-ease((R.t-.3)/.4)*260}
-function board(i,x,y,st,pulse){const a=G.q.ans[i],sel=st===1;cx.save();cx.translate(x,y+44);const s=sel?1.07:1;cx.scale(s,s);
- RR(-52,-44,104,88,10);cx.fillStyle=st===2?'#16a34a':st===3?'#b91c1c':'#0e5a35';cx.fill();
+ if(R.ok)return-ease((R.t-.35)/.45)*300;
+ if(i===g.q.cl)return-(R.dt===undefined?0:ease(R.dt/.3))*300;   /* after a miss the right sign stays until the card is closed */
+ if(i===R.lane)return-ease((R.t-1.4)/.4)*300;
+ return-ease((R.t-.3)/.4)*300}
+/* question layout: the question box under the HUD, the signs under it, the timer bar under the signs, the full answers at the bottom */
+function qLayout(){const q=G.q;if(q.lay&&q.lay.H===H)return q.lay;
+ let sf=19,L=wrapT(q.qs,330,sf);if(L.length>4){sf=17;L=wrapT(q.qs,330,sf)}if(L.length>5){sf=15;L=wrapT(q.qs,330,sf)}
+ const sy=70,sh=L.length*(sf+5)+16,by=sy+sh+26,ty=by+112+14,rows=[];let tot=0;
+ q.ans.forEach(a=>{const h=a.bl.length*(a.bs+3)+14;rows.push({h});tot+=h+5});
+ let y=H-8-tot+5;rows.forEach(r=>{r.y=y;y+=r.h+5});
+ return q.lay={H,sf,L,sy,sh,by,ty,rows,top:rows[0].y}}
+const signY0=(n,fs)=>7-(n-1)*(fs+3)/2;
+function board(i,x,y,st,pulse){const a=G.q.ans[i],sel=st===1;cx.save();cx.translate(x,y+56);const s=sel?1.07:1;cx.scale(s,s);
+ RR(-52,-56,104,112,10);cx.fillStyle=st===2?'#16a34a':st===3?'#b91c1c':'#0e5a35';cx.fill();
  cx.lineWidth=sel?5:3;cx.strokeStyle=sel?'#ffe45c':(st===2&&pulse?'#d9ffd9':'#fff');cx.stroke();
- cx.save();RR(-52,-44,104,16,10);cx.clip();cx.fillStyle=BC[i];cx.fillRect(-52,-44,104,16);cx.restore();
- cx.fillStyle='#fff';cx.beginPath();cx.moveTo(-8,-40);cx.lineTo(8,-40);cx.lineTo(0,-31);cx.fill();
- const L=a.lines,lh=19,y0=-6-(L.length-1)*lh/2+4;L.forEach((l,k)=>T(l,0,y0+k*lh,16,'#fff','center'));
- if(st===3){cx.strokeStyle='#ffd0d0';cx.lineWidth=5;cx.beginPath();cx.moveTo(34,29);cx.lineTo(45,40);cx.moveTo(45,29);cx.lineTo(34,40);cx.stroke()}
- if(st===2){cx.strokeStyle='#d9ffd9';cx.lineWidth=5;cx.beginPath();cx.moveTo(33,34);cx.lineTo(38,39);cx.lineTo(46,28);cx.stroke()}
+ cx.save();RR(-52,-56,104,16,10);cx.clip();cx.fillStyle=BC[i];cx.fillRect(-52,-56,104,16);cx.restore();
+ cx.fillStyle='#fff';cx.beginPath();cx.moveTo(-8,-52);cx.lineTo(8,-52);cx.lineTo(0,-43);cx.fill();
+ const L=a.lines,fs=a.fs||19,lh=fs+3,y0=signY0(L.length,fs);L.forEach((l,k)=>T(l,0,y0+k*lh,fs,'#fff','center'));
+ if(st===3){cx.strokeStyle='#ffd0d0';cx.lineWidth=5;cx.beginPath();cx.moveTo(34,41);cx.lineTo(45,52);cx.moveTo(45,41);cx.lineTo(34,52);cx.stroke()}
+ if(st===2){cx.strokeStyle='#d9ffd9';cx.lineWidth=5;cx.beginPath();cx.moveTo(33,46);cx.lineTo(38,51);cx.lineTo(46,40);cx.stroke()}
  cx.restore()}
-function drawBoards(){const g=G,q=g.q;if(!q||(g.phase!=='quiz'&&g.phase!=='res')||q.t<0)return;const R=g.res,yb=lerp(-150,84,back(q.t/.5));
+function drawBoards(){const g=G,q=g.q;if(!q||(g.phase!=='quiz'&&g.phase!=='res'))return;const R=g.res,lay=qLayout(),yb=lerp(-170,lay.by,back(q.t/.5));
  const offs=[0,1,2].map(exitOff),barY=yb-18+Math.max(...offs);
  cx.fillStyle='#39424f';cx.fillRect(0,barY,W,8);cx.fillStyle='#5b6676';cx.fillRect(0,barY,W,3);
  for(let i=0;i<3;i++){const x=CX+(i-1)*LN*PX,y=yb+offs[i];cx.fillStyle='#cfd8e3';cx.fillRect(x-34,barY+8,4,y+6-barY-8);cx.fillRect(x+30,barY+8,4,y+6-barY-8);
   let st=0;if(R){if(i===R.lane)st=R.ok?2:3;else if(!R.ok&&i===q.cl)st=2}else if(i===g.lane)st=1;
   board(i,x,y,st,Math.floor(g.t*6)%2)}}
 /* the bottom bar: the FULL text of each answer, one row per lane, in the lane colour; shown while the moment is open */
-function drawAnsBar(){const g=G,q=g.q;if(!q||(g.phase!=='quiz'&&g.phase!=='res')||q.t<0)return;const R=g.res;
+function drawAnsBar(){const g=G,q=g.q;if(!q||(g.phase!=='quiz'&&g.phase!=='res'))return;const R=g.res,lay=qLayout();
  let gone=0;if(R){if(R.ok)gone=ease((R.t-.35)/.45);else if(R.dt!==undefined)gone=ease(R.dt/.3)}
- const slide=(1-ease(q.t/.35))*130+gone*130,y0=H-122;
- for(let i=0;i<3;i++){const an=q.ans[i],y=y0+i*37+slide,mine=R&&i===R.lane;let bg='rgba(8,14,32,.93)',bd=BC[i],fg='#fff';
+ const slide=(1-ease(q.t/.35))*200+gone*200;
+ for(let i=0;i<3;i++){const an=q.ans[i],rw=lay.rows[i],y=rw.y+slide,mine=R&&i===R.lane;let bg='rgba(8,14,32,.93)',bd=BC[i],fg='#fff';
   if(R){if(an.ok){bg='#14532d';bd='#6dffa0'}else if(mine){bg='#5b1a1a';bd='#ff6b6b'}else{bg='rgba(8,14,32,.75)';fg='#9fb3c8'}}
   else if(i===g.lane){bg='rgba(34,46,80,.97)';bd='#ffe45c'}
-  RR(8,y,374,34,9);cx.fillStyle=bg;cx.fill();cx.lineWidth=!R&&i===g.lane?3:2;cx.strokeStyle=bd;cx.stroke();
-  RR(14,y+5,36,24,6);cx.fillStyle=BC[i];cx.fill();cx.fillStyle='#fff';cx.beginPath();const ax=32,ay=y+17;
+  RR(8,y,374,rw.h,9);cx.fillStyle=bg;cx.fill();cx.lineWidth=!R&&i===g.lane?3:2;cx.strokeStyle=bd;cx.stroke();
+  const mh=Math.min(28,rw.h-12);RR(14,y+(rw.h-mh)/2,36,mh,6);cx.fillStyle=BC[i];cx.fill();cx.fillStyle='#fff';cx.beginPath();const ax=32,ay=y+rw.h/2;
   if(i===0){cx.moveTo(ax-7,ay);cx.lineTo(ax+3,ay-7);cx.lineTo(ax+3,ay+7)}else if(i===1){cx.moveTo(ax,ay-7);cx.lineTo(ax+7,ay+4);cx.lineTo(ax-7,ay+4)}else{cx.moveTo(ax+7,ay);cx.lineTo(ax-3,ay-7);cx.lineTo(ax-3,ay+7)}cx.fill();
-  fitT(an.t,58,y+18,316,15,fg,'left')}}
-/* the scene question: alone and large for 1.5 s before the signs land, then a small strip for the rest of the window */
-function drawQ(){const g=G,q=g.q;if(!q||g.phase!=='quiz')return;
- if(q.t<0){const a=ease((q.t+PRE)/.25),L=wrapT(q.qs,312,24),h=L.length*30+22,y=96-(1-a)*24;cx.save();cx.globalAlpha=a;RR(24,y,342,h,16);cx.fillStyle='rgba(8,14,32,.92)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ffd23f';cx.stroke();
-  L.forEach((l,k)=>T(l,CX,y+26+k*30,24,'#fff','center'));cx.restore()}
- else{const L=wrapT(q.qs,320,15),h=L.length*20+12;RR(30,252,330,h,10);cx.fillStyle='rgba(8,14,32,.8)';cx.fill();L.forEach((l,k)=>T(l,CX,252+16+k*20,15,'#fff','center'))}}
-function drawTimerBar(){const g=G,q=g.q;if(!q||g.phase!=='quiz'||q.t<0)return;const rem=1-qr(q.t,q),x=30,w=330,y=182,h=10,early=rem>1-FW;
- cx.fillStyle='rgba(0,0,0,.5)';RR(x-2,y-2,w+4,h+4,7);cx.fill();cx.fillStyle=early?'#ffd23f':'#7a8aa5';RR(x,y,Math.max(2,w*rem),h,5);cx.fill();
- cx.fillStyle='#fff';cx.fillRect(x+w*(1-FW)-1,y-3,2,h+6);T(g.warp>1?'LOCKED IN - TURBO':early?'TURBO ZONE':'NO BOOST',x+2,y+22,12,early?'#ffd23f':'#cfe0f5','left',3)}
+  const bl=an.bl||[an.t],bs=an.bs||18;bl.forEach((l,k)=>T(l,58,y+rw.h/2+(k-(bl.length-1)/2)*(bs+3),bs,fg,'left'))}}
+/* the question stays on screen the whole time (the road crawls), at 19 px */
+function drawQ(){const g=G,q=g.q;if(!q||g.phase!=='quiz')return;const lay=qLayout(),a=ease(q.t/.25),y=lay.sy-(1-a)*24;
+ cx.save();cx.globalAlpha=a;RR(14,y,362,lay.sh,14);cx.fillStyle='rgba(8,14,32,.93)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ffd23f';cx.stroke();
+ lay.L.forEach((l,k)=>T(l,CX,y+8+(lay.sf+5)/2+k*(lay.sf+5)+3,lay.sf,'#fff','center'));cx.restore()}
+function drawTimerBar(){const g=G,q=g.q;if(!q||g.phase!=='quiz'||q.t<.3)return;const lay=qLayout(),x=30,w=330,y=lay.ty,h=12,reading=q.t<q.rd;
+ cx.fillStyle='rgba(0,0,0,.55)';RR(x-2,y-2,w+4,h+4,8);cx.fill();
+ if(reading){cx.fillStyle='#4f7fb8';RR(x,y,Math.max(2,w*(q.t/q.rd)),h,6);cx.fill();T('READING',CX,y+h+16,16,'#cfe0f5','center',3)}
+ else{const rem=1-qr(q.t,q),early=rem>1-FW;cx.fillStyle=early?'#ffd23f':'#7a8aa5';RR(x,y,Math.max(2,w*rem),h,6);cx.fill();cx.fillStyle='#fff';cx.fillRect(x+w*(1-FW)-1,y-3,2,h+6);
+  T(early?'FAST BONUS +'+C_QFAST:'ANSWER',CX,y+h+16,16,early?'#ffd23f':'#cfe0f5','center',3)}}
 const ICON={bus:[14,()=>{cx.translate(.5,0);bus({lights:true,age:G.t})}],'4way':[17,stopSign],cross:[24,()=>{person('#e84393',G.t,1,'#3a2a1a',1.2);rc(-1.4,0,2.8,.12,'#fff')}],
- yellow:[8.6,()=>signal('y',G.t)],amb:[14,()=>ambu(false,G.t)],flag:[18,()=>flagger(false,G.t)],bike:[24,()=>{cx.scale(1.2,1.2);bike(G.t)}],curb:[18,()=>signPole('curb')]};
-/* teach card: the rule, a picture, and one "why" line. It stays until a tap (after 0.7 s) or 6 s; the road crawls meanwhile. */
-function drawTeach(){const g=G;if(g.phase!=='teach')return;const T0=g.pt,rule=RULES[g.cur.rule],col=rule.hard?'#ff5d5d':'#ffc928',HC=228;
- const out=g.td!==undefined?ease(g.td/.3):0,y=T0<.4?lerp(-240,74,back(T0/.4)):lerp(74,-240,out);
- RR(16,y,358,HC,16);cx.fillStyle='#10243f';cx.fill();cx.lineWidth=4;cx.strokeStyle=col;cx.stroke();
- cx.save();RR(16,y,358,28,16);cx.clip();cx.fillStyle=col;cx.fillRect(16,y,358,28);cx.restore();
- T(rule.hard?'NEW RULE - A TRICKY ONE':'NEW RULE',CX,y+14,15,rule.hard?'#fff':'#10243f','center');
- cx.save();RR(30,y+42,76,76,12);cx.fillStyle='#e8f1fb';cx.fill();cx.clip();const ic=ICON[rule.k];cx.translate(68,y+112);cx.scale(ic[0],ic[0]);ic[1]();cx.restore();
- T(rule.title,120,y+54,22,col,'left');let tf=17,tl=wrapT(rule.teach,246,tf);if(tl.length>3){tf=15;tl=wrapT(rule.teach,246,tf)}   /* a font that wraps wider than Trebuchet still fits */
- tl.forEach((l,k)=>T(l,120,y+80+k*(tf+3),tf,'#fff','left'));
- cx.fillStyle='rgba(255,255,255,.18)';cx.fillRect(30,y+133,330,2);
- T('WHY',30,y+148,12,'#8fd0ff','left');let wf=16,wl=wrapT(rule.why,290,wf);if(wl.length>2){wf=14;wl=wrapT(rule.why,290,wf)}
- wl.forEach((l,k)=>T(l,70,y+148+k*(wf+4),wf,'#bfe6ff','left'));
- cx.globalAlpha=T0>=TEACH_MIN?(.65+.35*Math.sin(g.t*6)):.3;T('TAP TO CONTINUE',CX,y+HC-24,14,'#fff','center');cx.globalAlpha=1;
- cx.fillStyle=col;cx.fillRect(30,y+HC-12,330*clamp(1-T0/TEACH_MAX,0,1),4)}
+ yellow:[8.6,()=>signal('y',G.t)],amb:[14,()=>ambu(false,G.t)],flag:[18,()=>flagger(false,G.t)],bike:[24,()=>{cx.scale(1.2,1.2);bike(G.t)}],curb:[18,(r)=>signPole(r.cv)],hydrant:[26,hydrant]};
+/* one box for the teach card, the crash card and the miss card: head band, optional picture + title, the rule, the why, an optional "right" line, TAP TO CONTINUE.
+   Text sizes: rule 21 px (19, 17 when long), why 19 (17), right line 18 (16). */
+function boxLayout(rule,right,pic){const w=326;let rf=21,ru=wrapT(rule.teach,w,rf);if(ru.length>4){rf=19;ru=wrapT(rule.teach,w,rf)}if(ru.length>5){rf=17;ru=wrapT(rule.teach,w,rf)}
+ let wf=19,wy=wrapT('Why: '+rule.why,w,wf);if(wy.length>2){wf=17;wy=wrapT('Why: '+rule.why,w,wf)}
+ let rs=18,rl=right?wrapT(right,w,rs):[];if(rl.length>3){rs=16;rl=wrapT(right,w,rs)}
+ const h=38+(pic?82:0)+ru.length*(rf+5)+8+wy.length*(wf+4)+(rl.length?8+rl.length*(rs+4):0)+36;return{rf,ru,wf,wy,rs,rl,h}}
+function drawBox(y,head,hcol,rule,right,pic,tapA,tag){const L=boxLayout(rule,right,pic),w=358;
+ RR(16,y,w,L.h,16);cx.fillStyle='#10243f';cx.fill();cx.lineWidth=4;cx.strokeStyle=hcol;cx.stroke();
+ cx.save();RR(16,y,w,32,16);cx.clip();cx.fillStyle=hcol;cx.fillRect(16,y,w,32);cx.restore();
+ T(head,CX,y+17,17,'#10243f','center');
+ let yy=y+38;
+ if(pic){cx.save();RR(30,yy+4,68,68,12);cx.fillStyle='#e8f1fb';cx.fill();cx.clip();const ic=ICON[rule.k];cx.translate(64,yy+66);cx.scale(ic[0]*.9,ic[0]*.9);ic[1](rule);cx.restore();
+  fitT(rule.title,112,yy+38,252,25,hcol,'left');yy+=82}
+ L.ru.forEach((l,k)=>T(l,CX,yy+(L.rf+5)/2+k*(L.rf+5)+2,L.rf,'#fff','center'));yy+=L.ru.length*(L.rf+5)+8;
+ L.wy.forEach((l,k)=>T(l,CX,yy+(L.wf+4)/2+k*(L.wf+4),L.wf,'#bfe6ff','center'));yy+=L.wy.length*(L.wf+4);
+ if(L.rl.length){yy+=8;L.rl.forEach((l,k)=>T(l,CX,yy+(L.rs+4)/2+k*(L.rs+4),L.rs,'#7dffb0','center'))}
+ cx.globalAlpha=tapA;T('TAP TO CONTINUE',CX,y+L.h-20,17,'#fff','center');cx.globalAlpha=1;return L}
+const boxY=h=>Math.max(78,Math.round((H-h)/2)-24);
+function drawTeach(){const g=G;if(g.phase!=='teach')return;const T0=g.pt,rule=RULES[g.cur.u],col=rule.hard?'#ff7a6b':'#ffc928',L=boxLayout(rule,null,true),y0=boxY(L.h);
+ const out=g.td!==undefined?ease(g.td/.3):0,y=T0<.4?lerp(-300,y0,back(T0/.4)):lerp(y0,-300,out);
+ drawBox(y,rule.hard?'NEW RULE - A TRICKY ONE':'NEW RULE',col,rule,null,true,T0>=TEACH_MIN?(.65+.35*Math.sin(g.t*6)):.3)}
+function drawCrash(){const g=G,c=g.cc;if(g.phase!=='crash'||!c||!c.card)return;
+ const rule=c.rule,right='Right move: '+ACT_TXT[actOf(rule)],L=boxLayout(rule,right,false),y0=boxY(L.h),out=c.dt!==undefined?ease(c.dt/.3):0,y=c.ct<.3?lerp(H+40,y0,ease(c.ct/.3)):lerp(y0,-400,out);
+ drawBox(y,c.fromAd?'EXTRA LIFE - THE RULE':'CRASH - LIFE LOST',c.fromAd?'#7dffb0':'#ff6b6b',rule,right,false,c.ct>=.6?(.65+.35*Math.sin(g.t*6)):.3)}
+function drawToast(){const g=G,tt=g.toast;if(!tt||g.phase==='quiz'||g.phase==='res'||g.phase==='teach'||g.phase==='crash')return;
+ const L=wrapT(tt.txt,326,19),h=16+28+L.length*23+8,a=clamp(2.5-tt.t,0,1)*clamp(tt.t*8,0,1),y=82;
+ cx.save();cx.globalAlpha=a;RR(16,y,358,h,14);cx.fillStyle='rgba(60,12,16,.94)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ff6b6b';cx.stroke();
+ T(tt.head,CX,y+24,22,'#ff9f9f','center');L.forEach((l,k)=>T(l,CX,y+54+k*23,19,'#fff','center'));cx.restore()}
 function drawBanners(){const g=G,R=g.res,v=g.verdict;
- if(v){const k=1+.5*Math.exp(-v.t*9);cx.save();cx.translate(CX,370);cx.scale(k,k);cx.globalAlpha=clamp(1.5-v.t,0,1);T(v.s,0,0,v.size,v.col,'center',7);cx.restore()}
- /* the miss card: stays until a tap */
- if(R&&!R.ok&&R.card){const rule=RULES[g.q.rule],ra=g.q.ans[g.q.cl].t;let rf=19,ru=wrapT(rule.teach,326,rf),wy=wrapT(rule.why,300,16);if(ru.length>3){rf=17;ru=wrapT(rule.teach,326,rf)}if(wy.length>2)wy=wrapT(rule.why,300,14);
-  const HC=34+ru.length*24+6+wy.length*20+8+24+30,out=R.dt!==undefined?ease(R.dt/.3):0,y=R.cardT<.3?lerp(500,184,ease(R.cardT/.3)):lerp(184,-300,out);
-  RR(14,y,362,HC,16);cx.fillStyle='rgba(8,14,32,.96)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ffd23f';cx.stroke();
-  T('THE RULE'+(rule.hard?'  -  A TRICKY ONE':''),CX,y+18,14,rule.hard?'#ff9f6b':'#ffd23f','center');
-  let yy=y+46;ru.forEach(l=>{T(l,CX,yy,rf,'#fff','center');yy+=24});yy+=2;
-  wy.forEach((l,k)=>T(k?l:'Why: '+l,CX,yy+k*20,16,'#bfe6ff','center'));yy+=wy.length*20+6;
-  fitT('Right: '+ra,CX,yy+8,336,15,'#7dffb0','center');
-  cx.globalAlpha=R.cardT>=.6?(.65+.35*Math.sin(g.t*6)):.3;T('TAP TO CONTINUE',CX,y+HC-16,14,'#fff','center');cx.globalAlpha=1}
- /* locked in: a right re-ask */
- if(g.lock){const L=g.lock,a=clamp(2.2-L.tt,0,1),k=ease(L.tt/.25);cx.save();cx.globalAlpha=a;cx.translate(CX,296);cx.scale(.8+.2*k,.8+.2*k);RR(-155,-34,310,68,14);cx.fillStyle='#0f3d26';cx.fill();cx.lineWidth=3;cx.strokeStyle='#35e08a';cx.stroke();
-  T('LOCKED IN',0,-14,22,'#7dffb0','center');fitT(L.t,0,14,290,15,'#fff','center');cx.restore()}
+ if(v){const k=1+.5*Math.exp(-v.t*9);cx.save();cx.translate(CX,H*.44);cx.scale(k,k);cx.globalAlpha=clamp(1.5-v.t,0,1);T(v.s,0,0,v.size,v.col,'center',7);cx.restore()}
+ /* the miss card (a wrong answer to a question): the road has stopped, the right lane glows, the rule stays until a tap */
+ if(R&&!R.ok&&R.card){const rule=RULES[g.q.rule],right='Right: '+g.q.ans[g.q.cl].t,L=boxLayout(rule,right,false),y0=boxY(L.h),out=R.dt!==undefined?ease(R.dt/.3):0,y=R.cardT<.3?lerp(H+40,y0,ease(R.cardT/.3)):lerp(y0,-400,out);
+  drawBox(y,'WRONG - THE RULE'+(rule.hard?' (A TRICKY ONE)':''),'#ffd23f',rule,right,false,R.cardT>=.6?(.65+.35*Math.sin(g.t*6)):.3)}
+ if(g.lock){const L=g.lock,a=clamp(2.2-L.tt,0,1),k=ease(L.tt/.25);cx.save();cx.globalAlpha=a;cx.translate(CX,H*.4);cx.scale(.8+.2*k,.8+.2*k);RR(-165,-38,330,76,14);cx.fillStyle='#0f3d26';cx.fill();cx.lineWidth=3;cx.strokeStyle='#35e08a';cx.stroke();
+  T('LOCKED IN',0,-15,24,'#7dffb0','center');fitT(L.t,0,15,310,18,'#fff','center');cx.restore()}
  for(const p of g.pops){cx.save();cx.globalAlpha=clamp(1.3-p.t,0,1);T(p.s,p.x,p.y-p.t*40,p.size,p.col,'center',4);cx.restore()}
- if(g.phase==='finale')T('DMV AHEAD',CX,300,38,'#ffd23f','center',6)}
-function drawSiren(){const g=G,S=g.S,on=(S&&S.kind==='amb'&&g.phase==='quiz'&&S.age>.4)||g.sirenT>0;if(!on)return;
+ drawToast();drawBannerLv();drawHintBox()}
+function drawBannerLv(){const b=G.banner;if(!b||G.phase==='quiz'||G.phase==='teach')return;const a=clamp(2.8-b.t,0,1)*clamp(b.t*5,0,1),y=H*.3;
+ cx.save();cx.globalAlpha=a;RR(30,y-52,330,118,18);cx.fillStyle='rgba(8,14,32,.9)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ffd23f';cx.stroke();
+ T(b.l1,CX,y-20,38,'#ffd23f','center');T(b.l2,CX,y+16,23,'#fff','center');fitT(b.l3,CX,y+46,306,18,'#bfe6ff','center');cx.restore()}
+function drawHintBox(){const h=G.hint;if(!h||G.phase==='teach'||G.phase==='quiz')return;const a=clamp(3-h.t,0,1)*clamp(h.t*5,0,1),y=H*.58;
+ cx.save();cx.globalAlpha=a;RR(40,y-62,310,124,18);cx.fillStyle='rgba(8,14,32,.9)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#fff';cx.stroke();
+ T('SWIPE',CX,y-34,26,'#ffd23f','center');T('left or right: change lane',CX,y-8,19,'#fff','center');
+ T('HOLD',CX,y+20,26,'#ff9f9f','center');T('anywhere: brake. Let go: go',CX,y+46,19,'#fff','center');cx.restore()}
+function drawLvClear(){const g=G;if(g.phase!=='lvclear')return;const a=ease(g.pt/.4),y=H*.5;
+ cx.fillStyle='rgba(4,8,22,'+(.55*a)+')';cx.fillRect(0,0,W,H);for(const c of g.conf){cx.fillStyle=c.c;cx.fillRect(c.x,c.y,c.w,c.w*.6)}
+ cx.save();cx.globalAlpha=a;cx.translate(CX,y);const k=.85+.15*a;cx.scale(k,k);RR(-165,-120,330,240,22);cx.fillStyle='#0f1b33';cx.fill();cx.lineWidth=4;cx.strokeStyle='#35e08a';cx.stroke();
+ T('LEVEL '+g.level+' CLEAR!',0,-70,36,'#35e08a','center');T(g.coins+' coins',0,-24,28,'#ffd23f','center');
+ const nf=g.level<MAXL?FAM_ADD[g.level+1].map(f=>RULES[lvUnit(f,g.level+1)].name):[];
+ if(g.level<MAXL){T('Next: level '+(g.level+1)+', faster',0,18,21,'#fff','center');fitT(nf.length>2?nf.length+' new rules':nf.length?'New: '+nf.join(', '):'Fastest level',0,48,300,18,'#bfe6ff','center');T('A short ad comes first',0,86,16,'#9fb3c8','center')}
+ else T('The last level. You did it!',0,28,22,'#fff','center');cx.restore()}
+function drawAd(){const g=G,ad=g.ad;if(!ad)return;const left=Math.max(0,AD_SEC-ad.t);
+ const gr=cx.createLinearGradient(0,0,0,H);gr.addColorStop(0,'#0d1433');gr.addColorStop(1,'#1d2d63');cx.fillStyle=gr;cx.fillRect(0,0,W,H);
+ const top=H>=800?72:50;
+ fitT('AD PLACEHOLDER: 15 s sponsor spot',CX,top,350,21,'#ffd23f','center');T('Not a real ad. No skip.',CX,top+28,15,'#9fb3c8','center');
+ const py=top+54;cx.fillStyle='#fff';RR(30,py,330,H>=800?150:130,18);cx.fill();cx.fillStyle='#e8eefc';RR(30,py,330,34,18);cx.fill();T('SPONSOR (FAKE)',CX,py+17,14,'#51607f','center');
+ fitT(ad.spon[0],CX,py+(H>=800?76:68),306,31,'#10243f','center');fitT(ad.spon[1],CX,py+(H>=800?116:102),306,17,'#51607f','center');
+ const cy=py+(H>=800?150:130)+(H>=800?112:92),r=64;cx.lineWidth=12;cx.strokeStyle='rgba(255,255,255,.15)';cx.beginPath();cx.arc(CX,cy,r,0,6.2832);cx.stroke();
+ cx.strokeStyle='#ffd23f';cx.lineCap='round';cx.beginPath();cx.arc(CX,cy,r,-Math.PI/2,-Math.PI/2+6.2832*clamp(ad.t/AD_SEC,0,1));cx.stroke();
+ T(String(Math.ceil(left)),CX,cy,62,'#fff','center');T('Ad ends in '+Math.ceil(left)+' s',CX,cy+r+32,20,'#fff','center');
+ if(ad.after==='life')T('Watch it all to get an extra life.',CX,cy+r+60,17,'#7dffb0','center');else T('Your next level starts after the ad.',CX,cy+r+60,17,'#bfe6ff','center');
+ const ry=H-64;cx.fillStyle='#2a2f3e';cx.fillRect(0,ry,W,64);cx.fillStyle='#f4f4f4';for(let x=-((ad.t*120)%60);x<W;x+=60)cx.fillRect(x,ry+30,34,5);
+ cx.save();cx.translate(CX,ry+52);cx.scale(26,26);carRear('#e84393',false,false);cx.restore()}
+function drawSiren(){const g=G,S=g.S,on=(S&&S.kind==='amb'&&(g.phase==='quiz'||g.phase==='play')&&S.age>.4&&S.rz<30)||g.sirenT>0;if(!on)return;
  const f=Math.floor(g.t*6)%2,c1=f?'255,40,40':'40,90,255',c2=f?'40,90,255':'255,40,40';
  let gr=cx.createLinearGradient(0,0,110,0);gr.addColorStop(0,'rgba('+c1+',.35)');gr.addColorStop(1,'rgba('+c1+',0)');cx.fillStyle=gr;cx.fillRect(0,0,110,H);
  gr=cx.createLinearGradient(W,0,W-110,0);gr.addColorStop(0,'rgba('+c2+',.35)');gr.addColorStop(1,'rgba('+c2+',0)');cx.fillStyle=gr;cx.fillRect(W-110,0,110,H)}
-function drawMirror(){const g=G,S=g.S;if(!S||S.kind!=='amb'||S.rz>=0||g.phase==='over')return;const c=clamp((S.rz+85)/83,0,1),f=Math.floor(g.t*6)%2;
- cx.save();RR(120,196,150,44,10);cx.fillStyle='#223';cx.fill();cx.clip();cx.fillStyle='#5a6270';cx.fillRect(120,196,150,44);cx.fillStyle='#3a404d';cx.fillRect(120,214,150,26);
- const w=14+120*c,h=10+30*c,x=CX-w/2,y=238-h;cx.fillStyle=S.vi===1?'#1f3a8a':'#f6f6f6';cx.fillRect(x,y,w,h);
+function drawMirror(){const g=G,S=g.S,my=g.phase==='quiz'?H-0:0;if(!S||S.kind!=='amb'||S.rz>=0||g.mode==='end'||g.phase==='ad'||g.phase==='lvclear')return;const c=clamp((S.rz+85)/83,0,1),f=Math.floor(g.t*6)%2,by=g.phase==='quiz'?lay0():196;
+ cx.save();RR(120,by,150,44,10);cx.fillStyle='#223';cx.fill();cx.clip();cx.fillStyle='#5a6270';cx.fillRect(120,by,150,44);cx.fillStyle='#3a404d';cx.fillRect(120,by+18,150,26);
+ const w=14+120*c,h=10+30*c,x=CX-w/2,y=by+42-h;cx.fillStyle=S.vi===1?'#1f3a8a':'#f6f6f6';cx.fillRect(x,y,w,h);
  cx.fillStyle=f?'#ff2d2d':'#701818';cx.fillRect(x,y,w/2,Math.max(2,h*.22));cx.fillStyle=f?'#2d6bff':'#162a70';cx.fillRect(x+w/2,y,w/2,Math.max(2,h*.22));
  cx.fillStyle='#ffe9a8';cx.fillRect(x+w*.12,y+h*.6,w*.16,h*.2);cx.fillRect(x+w*.72,y+h*.6,w*.16,h*.2);cx.restore();
- cx.lineWidth=3;cx.strokeStyle='#cfd8e3';RR(120,196,150,44,10);cx.stroke()}
+ cx.lineWidth=3;cx.strokeStyle='#cfd8e3';RR(120,by,150,44,10);cx.stroke();T('BEHIND YOU',CX,by-10,13,'#fff','center',3)}
+const lay0=()=>G.q&&G.q.lay?G.q.lay.ty+56:196;
 
 /* ---------- title, end card (the share card) ---------- */
 function drawTitle(){const g=G,p=.5+.5*Math.sin(g.t*4);
  const gr=cx.createLinearGradient(0,0,0,H);gr.addColorStop(0,'rgba(5,10,30,.65)');gr.addColorStop(.6,'rgba(5,10,30,.2)');gr.addColorStop(1,'rgba(5,10,30,.55)');cx.fillStyle=gr;cx.fillRect(0,0,W,H);
- T('RUSH HOUR',CX,200,58,'#ffd23f','center',8);T('Green Light driving test',CX,250,19,'#fff','center',4);
- T("Today's route: "+DAY,CX,282,14,'#bfe0ff','center',3);
- cx.save();cx.translate(CX,450);cx.scale(1+.06*p,1+.06*p);T('TAP TO DRIVE',0,0,34,'#fff','center',6);cx.restore();
- T('Swipe left or right to change lane',CX,498,15,'#dbe9f8','center',3);T('Pass: 9 of 12 right, under 3 strikes',CX,524,14,'#dbe9f8','center',3);
- T('Cards stay until you tap them',CX,550,14,'#dbe9f8','center',3);
+ const o=H>=800?0:-40;
+ T('RUSH HOUR',CX,200+o,58,'#ffd23f','center',8);T('Green Light driving test',CX,250+o,21,'#fff','center',4);
+ T("Today's route: "+DAY,CX,282+o,15,'#bfe0ff','center',3);
+ cx.save();cx.translate(CX,430+o);cx.scale(1+.06*p,1+.06*p);T('TAP TO DRIVE',0,0,36,'#fff','center',6);cx.restore();
+ T('Swipe left or right: change lane',CX,480+o,18,'#dbe9f8','center',3);T('Press and hold: brake',CX,506+o,18,'#dbe9f8','center',3);
+ T('Reach the coin target to clear a level',CX,538+o,16,'#dbe9f8','center',3);T('3 crashes and it is over',CX,560+o,16,'#dbe9f8','center',3);
  RR(CALMB.x,CALMB.y,CALMB.w,CALMB.h,14);cx.fillStyle=CALM?'#0e7490':'rgba(5,10,30,.7)';cx.fill();cx.lineWidth=3;cx.strokeStyle=CALM?'#9fe8ff':'rgba(255,255,255,.7)';cx.stroke();
- T(CALM?'CALM: ON':'CALM: OFF',CX,CALMB.y+CALMB.h/2,22,'#fff','center');T('Calm gives you twice the time to answer',CX,CALMB.y+CALMB.h+22,13,'#dbe9f8','center',3);
-}
+ T(CALM?'CALM: ON':'CALM: OFF',CX,CALMB.y+CALMB.h/2,24,'#fff','center');T('Calm: double time to answer, slower cars',CX,CALMB.y+CALMB.h+20,14,'#dbe9f8','center',3)}
 const SQC={g:'#2ecc71',y:'#f1c40f',r:'#e74c3c'};
-/* two layouts: tall (H 820 or more, 390x844) and compact (a phone browser with a toolbar, 390x664 up to 819) */
-const endL=win=>H>=820?{top:50,h:760,hy:112,hs:win?60:46,ry:158,dy:182,sq:198,dot:231,tl:258,tv:288,ts:36,st:326,rr:356,ls:388,l1:562,l2:590,cap:676}
-  :{top:12,h:H-24,hy:54,hs:win?48:38,ry:92,dy:112,sq:126,dot:157,tl:178,tv:204,ts:30,st:232,rr:256,ls:282,l1:452,l2:478,cap:COPY.y+COPY.h+14};
-function drawEnd(){const g=G,r=g.result,win=r.win,a=ease(g.endT/.35),first=g.missFirst?RULES[g.missFirst.rule]:null,rl=ruleLists(),L=endL(win);
- cx.fillStyle='rgba(4,8,22,'+(.8*a)+')';cx.fillRect(0,0,W,H);
+function btn(b,label,sub,on,col,tcol){RR(b.x,b.y,b.w,b.h,14);cx.fillStyle=on?col:'#232c3f';cx.fill();cx.lineWidth=3;cx.strokeStyle=on?'#fff':'#46526b';cx.stroke();
+ if(sub){fitT(label,CX,b.y+16,b.w-16,15,on?tcol:'#7d8aa3','center');T(sub,CX,b.y+34,17,on?tcol:'#9fb0cc','center')}else fitT(label,CX,b.y+b.h/2,b.w-16,19,on?tcol:'#7d8aa3','center')}
+function drawEnd(){const g=G,r=g.result,win=r.win,a=ease(g.endT/.35),O=H>=800?(H-664)*.25:0;
+ cx.fillStyle='rgba(4,8,22,'+(.82*a)+')';cx.fillRect(0,0,W,H);
  for(const c of g.conf){cx.fillStyle=c.c;cx.fillRect(c.x,c.y,c.w,c.w*.6)}
  cx.save();cx.translate(0,(1-a)*40);cx.globalAlpha=a;
- RR(18,L.top,354,L.h,22);cx.fillStyle='#0f1b33';cx.fill();cx.lineWidth=4;cx.strokeStyle=win?'#35e08a':'#ff4d4d';cx.stroke();
- cx.save();cx.translate(CX,L.hy);cx.rotate(-.07);T(win?'PASSED':'SUSPENDED',0,0,L.hs,win?'#35e08a':'#ff4d4d','center',6);cx.restore();
- T(win?'You reached the DMV.':r.why==='strikes'?'3 strikes. Your license is suspended.':'Only '+g.right+' of 12 right. You need 9.',CX,L.ry,15,'#fff','center');
- T('DAILY ROUTE '+DAY+(g.calm?'   CALM RUN':''),CX,L.dy,12,g.calm?'#9fe8ff':'#8fa8c8','center');
- for(let i=0;i<12;i++){const x=41+i*26,c=g.log[i],hard=ROUTE[i]&&RULES[ROUTE[i].rule].hard;cx.fillStyle=SQC[c]||'#3b4560';RR(x,L.sq,22,22,4);cx.fill();
-  if(hard){cx.fillStyle='#fff';cx.beginPath();cx.arc(x+11,L.dot,3,0,6.3);cx.fill()}}
- T('TIME',105,L.tl,11,'#8fa8c8');T(fmtT(g.runT),105,L.tv,L.ts,'#fff','center');T('SCORE',285,L.tl,11,'#8fa8c8');T(String(g.score),285,L.tv,L.ts,'#ffd23f','center');
- T('RIGHT '+g.right+'/'+g.done+'     BEST STREAK '+g.bestStreak+'     STRIKES '+g.strikes,CX,L.st,13,'#c7d6e6','center');
- if(first)fitT(roastOf(g.missFirst),CX,L.rr,330,16,'#ffd23f','center');else T('Clean run. Nothing to roast.',CX,L.rr,18,'#7dffb0','center');
- let y=L.ls;
- const sect=(title,col,arr)=>{if(!arr.length)return;T(title,CX,y,14,col,'center');y+=21;arr.forEach(k=>{fitT(RULES[k].short,CX,y,326,14,'#fff','center');y+=19});y+=9};
- sect('RULES YOU LEARNED TODAY','#7dffb0',rl.mastered);sect('RULES TO PRACTISE','#ff9f6b',rl.practise);
- if(!rl.mastered.length&&!rl.practise.length)T('No rule was asked twice yet.',CX,y+4,14,'#c7d6e6','center');
- [['g','fast + right',44],['y','slow + right',150],['r','wrong',262]].forEach(([c,s,x])=>{cx.fillStyle=SQC[c];RR(x,L.l1,14,14,3);cx.fill();T(s,x+20,L.l1+8,13,'#c7d6e6','left')});
- cx.fillStyle='#fff';cx.beginPath();cx.arc(51,L.l2,3,0,6.3);cx.fill();T('= a tricky rule',62,L.l2,13,'#c7d6e6','left');
- RR(COPY.x,COPY.y,COPY.w,COPY.h,14);cx.fillStyle=g.copied>0?'#16a34a':g.copied<0?'#b91c1c':'#2f80ed';cx.fill();
- T(g.copied>0?'COPIED!':g.copied<0?'COPY FAILED':'COPY RESULT',CX,COPY.y+COPY.h/2,22,'#fff','center');
- T('Copies the squares, time and link',CX,L.cap,13,'#a9bfdc','center');
- const p=1+.03*Math.sin(g.endT*5);cx.save();cx.translate(CX,RUN.y+RUN.h/2);cx.scale(p,p);RR(-RUN.w/2,-RUN.h/2,RUN.w,RUN.h,18);cx.fillStyle='#ffd23f';cx.fill();
- T('TAP TO RUN AGAIN',0,0,24,'#10243f','center');cx.restore();
+ RR(18,12,354,H-24,22);cx.fillStyle='#0f1b33';cx.fill();cx.lineWidth=4;cx.strokeStyle=win?'#35e08a':'#ff4d4d';cx.stroke();
+ cx.save();cx.translate(CX,56+O);cx.rotate(-.05);T(win?'ALL CLEAR!':'GAME OVER',0,0,46,win?'#35e08a':'#ff4d4d','center',6);cx.restore();
+ T(win?'You cleared all '+MAXL+' levels.':'You reached level '+g.level+'.',CX,98+O,21,'#fff','center');
+ T('DAILY ROUTE '+DAY+(g.calm?'   CALM RUN':''),CX,122+O,13,g.calm?'#9fe8ff':'#8fa8c8','center');
+ [['COINS',String(totalCoins()),70,'#ffd23f'],['TIME',fmtT(g.runT),195,'#fff'],['LIVES LEFT',String(Math.max(0,g.lives)),320,'#ff6b8b']].forEach(([l,v,x,c])=>{T(l,x,148+O,13,'#8fa8c8','center');T(v,x,176+O,30,c,'center')});
+ const sq=g.log.slice(-54),n=sq.length;let sy=208+O;
+ for(let i=0;i<n;i++){const row=Math.floor(i/18),col=i%18,cnt=Math.min(18,n-row*18),x0=CX-cnt*19/2+col*19;cx.fillStyle=SQC[sq[i]]||'#3b4560';RR(x0,sy+row*19,17,17,4);cx.fill()}
+ let y=sy+Math.max(1,Math.ceil(n/18))*19+14;
+ if(!win&&g.lastCrash){T('THE RULE YOU BROKE',CX,y,13,'#ff9f6b','center');y+=6;const L=wrapT(g.lastCrash.rule.short,326,18).slice(0,2);L.forEach((l,k)=>T(l,CX,y+16+k*22,18,'#fff','center'))}
+ [['g','right',30],['y','slow / minor',110],['r','wrong / crash',236]].forEach(([c,s,x])=>{cx.fillStyle=SQC[c];RR(x,ADB.y-30,14,14,3);cx.fill();T(s,x+20,ADB.y-23,14,'#c7d6e6','left')});
+ if(!win){btn(ADB,g.extraUsed?'EXTRA LIFE USED':'WATCH AN AD FOR AN EXTRA LIFE',null,!g.extraUsed,'#16a34a','#fff');
+  btn(MINI,'MINI GAME FOR AN EXTRA LIFE','COMING SOON',false,'#232c3f','#fff')}
+ btn(RUN,'START OVER',null,true,'#ffd23f','#10243f');
+ btn(COPY,g.copied>0?'COPIED!':g.copied<0?'COPY FAILED':'COPY RESULT',null,true,g.copied>0?'#16a34a':g.copied<0?'#b91c1c':'#2f80ed','#fff');
  cx.restore()}
 
 /* ---------- frame ---------- */
@@ -742,24 +835,24 @@ function draw(al){const g=G,rd=g.dist,rx=g.carX;
  if(al>=0&&al<=1){g.dist=lerp(g.pd,rd,al);g.carX=lerp(g.px,rx,al)}  /* render interpolation (Fiedler): smooth on 90 and 120 Hz screens */
  cx.save();cx.clearRect(0,0,W,H);
  const sh=g.shake;cx.translate((Math.random()-.5)*sh*16,(Math.random()-.5)*sh*16);
- const zf=1+clamp((g.v*g.warp-27)/40,0,.12)*.5,zy=GY-180;cx.translate(CX,zy);cx.scale(zf,zf);cx.translate(-CX,-zy);
  drawWorld();drawBuildings();drawFurniture();
  const d=g.dist,dl=[];if(g.S)dl.push({z:g.S.az-d,f:()=>drawScene(g.S)});
  for(const o of g.objs)dl.push({z:o.wz-d,f:()=>drawObj(o)});
- if(g.dmv)dl.push({z:g.dmv-d,f:()=>at(0,g.dmv-d,dmvB)});
  dl.sort((a,b)=>b.z-a.z);for(const e of dl)if(e.z>=0)e.f();
  drawPlayer();for(const e of dl)if(e.z<0)e.f();
- drawSpeedLines();cx.restore();
+ cx.restore();
  drawSiren();
  if(g.flash){cx.fillStyle=g.flash.col;cx.globalAlpha=clamp(g.flash.a,0,1)*.7;cx.fillRect(0,0,W,H);cx.globalAlpha=1}
- drawMirror();drawHUD();drawBoards();drawAnsBar();drawQ();drawTimerBar();drawTeach();drawBanners();
+ drawMirror();drawHUD();drawBoards();drawAnsBar();drawQ();drawTimerBar();drawTeach();drawBanners();drawCrash();drawLvClear();
  if(g.mode==='title')drawTitle();else if(g.mode==='end')drawEnd();
+ if(g.mode==='run'&&g.phase==='ad')drawAd();
  drawMute();
  g.dist=rd;g.carX=rx}
 resize();G=blank('title');
 let lastTs=0,acc=0;
-function frame(ts){requestAnimationFrame(frame);const dt=Math.min(.1,Math.max(0,(ts-lastTs)/1000));lastTs=ts;acc+=dt*TS;
- let n=0;const mx=8+Math.ceil(6*TS);while(acc>=DT&&n<mx){step();acc-=DT;n++}if(n>=mx)acc=0;draw(acc/DT)}
+function frame(ts){requestAnimationFrame(frame);if(DEV&&window.__pause){lastTs=ts;draw(acc/DT);return}   /* __pause: a test freezes the game to take a screenshot (dev only) */
+ const dt=Math.min(.1,Math.max(0,(ts-lastTs)/1000));lastTs=ts;acc+=dt*TS;
+ let n=0;const mx=8+Math.ceil(6*TS);while(acc>=DT&&n<mx){step();if(DEV&&window.__hook)window.__hook();acc-=DT;n++}if(n>=mx)acc=0;draw(acc/DT)}   /* __hook: a test bot runs after every game step (dev only) */
 requestAnimationFrame(frame);
 /* test hooks (?dev=1 only) */
 async function renderOffline(kind,opt){opt=opt||{};const sec=opt.sec||8,sr=44100,oc=new OfflineAudioContext(2,Math.round(sr*sec),sr),E=makeEngine(oc,false);
@@ -767,12 +860,27 @@ async function renderOffline(kind,opt){opt=opt||{};const sec=opt.sec||8,sr=44100
  const buf=await oc.startRendering(),x=buf.getChannelData(0);let pk=0,e=0,d=0,d2=0,lastIdx=0;
  for(let i=0;i<x.length;i++){const v=x[i];pk=Math.max(pk,Math.abs(v));e+=v*v;if(i)d+=(v-x[i-1])*(v-x[i-1]);if(i>1){const s2=v-2*x[i-1]+x[i-2];d2+=s2*s2}if(Math.abs(v)>.002)lastIdx=i}
  return{peak:+pk.toFixed(3),rms:+Math.sqrt(e/x.length).toFixed(4),hf:+(d/Math.max(e,1e-12)).toFixed(5),hf2:+(d2/Math.max(e,1e-12)).toFixed(5),soundSec:+(lastIdx/sr).toFixed(2),nan:x.some(v=>v!==v)}}
-if(DEV)window.__rush={get G(){return G},get route(){return ROUTE},seed:SEED,day:DAY,rules:RULES,start(route){startRun();if(route)ROUTE=route},renderOffline,lists:ruleLists,get H(){return H},COPY,RUN,CALMB,endL,
+/* the layout of every card and sign for every unit and question (the real wrap functions), so a test can check nothing clips at 390x664 */
+function fitAll(){const out={teach:[],crash:[],miss:[],signs:[],bars:[],stems:[]};
+ RULES.forEach((r,i)=>{const t=boxLayout(r,null,true),c=boxLayout(r,'Right move: '+ACT_TXT[actOf(r)],false);out.teach.push({i,h:t.h,rf:t.rf,lines:t.ru.length});out.crash.push({i,h:c.h,rf:c.rf});
+  r.qs.forEach(q=>{const m=boxLayout(r,'Right: '+q.o[0].t,false);out.miss.push({i,id:q.id,h:m.h});
+   let sf=19,L=wrapT(q.stem,330,sf);if(L.length>4){sf=17;L=wrapT(q.stem,330,sf)}if(L.length>5){sf=15;L=wrapT(q.stem,330,sf)}out.stems.push({id:q.id,sf,n:L.length,ok:L.every(l=>cx.measureText(l).width<=332)});
+   q.o.forEach(o=>{const f=signFit(o.s),b=barFit(o.t);out.signs.push({id:q.id,fs:f.fs,n:f.lines.length,w:Math.max(...f.lines.map(l=>(cx.font=`bold ${f.fs}px ${FONT}`,cx.measureText(l).width))),hh:f.lines.length*(f.fs+3)});
+    out.bars.push({id:q.id,fs:b.fs,n:b.lines.length,w:Math.max(...b.lines.map(l=>(cx.font=`bold ${b.fs}px ${FONT}`,cx.measureText(l).width))),txt:b.lines.join(' ')===o.t})})})});
+ return out}
+if(DEV)window.__rush={get G(){return G},seed:SEED,day:DAY,rules:RULES,start(){startRun()},
+ /* test: a fresh run whose only moment is unit ui (played or a question), no teach card, no coin target */
+ forcePlay(ui,k){startRun();const g=G;g.hint=null;g.banner=null;g.taught[ui]=1;g.moments=[{u:ui,k:k||'p',r:.5}];g.gapT=.2;g.target=99999},renderOffline,lists:ruleLists,get H(){return H},COPY,RUN,MINI,ADB,CALMB,fitAll,boxLayout,K_STOP,lvTarget,lvFam,levelUnits,buildMoments,
  audio:{state:()=>AC?AC.state:'none',muted:()=>MUTED,calm:()=>CALM,layer:()=>AE?AE.layer:-1,low:()=>AE?AE.low:null,musicOn:()=>AE?AE.on:false},
- peek(){const g=G,q=g.q;return{mode:g.mode,phase:g.phase,mi:g.mi,lane:g.lane,correct:q?q.cl:null,qt:q?q.t:0,W:q?q.W:0,rule:q?RULES[q.rule].k:(g.cur?RULES[g.cur.rule].k:null),
-  runT:g.runT,score:g.score,strikes:g.strikes,right:g.right,done:g.done,log:g.log.slice(),streak:g.streak,result:g.result,pt:g.pt,td:g.td,calm:g.calm,
-  card:!!(g.res&&g.res.card&&g.res.dt===undefined),cardT:g.res?g.res.cardT:0,lock:!!g.lock}}};
+ layoutQ(){const q=G.q;if(!q)return null;const l=qLayout();return{sy:l.sy,sh:l.sh,by:l.by,ty:l.ty,top:l.top,H,rows:l.rows.map(r=>[r.y,r.h]),sf:l.sf}},
+ peek(){const g=G,q=g.q,S=g.S;return{mode:g.mode,phase:g.phase,level:g.level,coins:g.coins,target:g.target,lives:g.lives,bank:g.bank,mi:g.mi,lane:g.lane,v:g.v,d:g.dist,carX:g.carX,braking:g.braking,
+  correct:q?q.cl:null,qid:q?q.qid:null,tier:q?q.tier:null,qt:q?q.t:0,W:q?q.W:0,rd:q?q.rd:0,tot:q?q.tot:0,kind:S?S.kind:null,act:S?S.act:null,play:S?!!S.play:false,
+  S:S&&S.play?{on:S.on,cleared:S.cleared,az:S.az,off:S.cfg?S.cfg.off:null,haz:S.cfg?S.cfg.haz:null,rz:S.rz,W:S.W,bl:S.bl,bx:S.bx,stopT:S.stopT,pen:S.pen,done:S.done,crashed:S.crashed,park:!!S.park,parkT:S.parkT,paid:S.paid,noStop:!!S.noStop,judged:S.judged,age:S.age,late:S.late,cv:S.cv}:null,
+  unit:g.cur?g.cur.u:null,mk:g.cur?g.cur.k:null,
+  runT:g.runT,right:g.right,done:g.done,played:g.played,asked:g.asked,crashes:g.crashes,log:g.log.slice(),streak:g.streak,result:g.result,pt:g.pt,td:g.td,calm:g.calm,extraUsed:g.extraUsed,
+  ccard:!!(g.cc&&g.cc.card&&g.cc.dt===undefined),cct:g.cc?g.cc.ct:0,ccFinal:g.cc?g.cc.final:null,
+  card:!!(g.res&&g.res.card&&g.res.dt===undefined),cardT:g.res?g.res.cardT:0,lock:!!g.lock,toast:g.toast?g.toast.txt:null,toastT:g.toast?g.toast.t:0,hint:!!g.hint,hintT:g.hint?g.hint.t:0,banner:!!g.banner,
+  adT:g.ad?g.ad.t:0,adAfter:g.ad?g.ad.after:null,adName:g.ad?g.ad.spon[0]:null,adLog:window.__adLog||[],idleT:g.idleT,miniDisabled:true,total:totalCoins()}}};
 </script>
 </body>
 </html>
-

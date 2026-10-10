@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#070a12">
+<title>Pulled Over</title>
+<style>
+html,body{margin:0;height:100%;background:#04060b;overflow:hidden;overscroll-behavior:none}
+canvas{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;outline:none;display:block}
+</style>
+</head>
+<body>
+<canvas id="c" width="390" height="844" tabindex="0"></canvas>
+<script>
+'use strict';
+/* PULLED OVER - Green Light prototype C (throwaway, vanilla JS + canvas, no images, no dependencies).
+ * Built from: Reigns (Nerial, 2016) - one binary swipe per card, three meters are the stakes, a run ends when a meter
+ * empties; Papers, Please (Lucas Pope, 2013) - rules applied to a stream of people under a clock, regulars who remember
+ * you; Wordle (Josh Wardle, 2021) - one seeded puzzle per day and a spoiler-free emoji grid to paste; juice from Jonasson
+ * and Purho, "Juice it or lose it" (2012) and Nijman (Vlambeer), "The art of screenshake" (2013).
+ * Teaching: worked example before problems (Atkinson et al. 2000), retrieval practice with a delayed second ask
+ * (Roediger and Karpicke 2006), feedback after a miss only (prototypes/TEACHING.md).
+ * Rules: 8 rules from 13 fact ids in bank/facts.json (ids sit in the RULES comments).
+ * Test hooks: window.__po (remove before ship). URL: ?seed=N fixes the shift, ?date=YYYY-MM-DD picks a day, ?ts=N speeds time up.
+ */
+const W=390,H=844,NCARS=20,BRIEF_T=3,FAST=.55,SNAP=.25,FONT='system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',MONO='ui-monospace,Consolas,"Courier New",monospace';
+const LINK='https://henry-the-robot.github.io/greenlight-play/proto/pulled-over/';
+const PT={fast:11,fastWhich:13,miss:-24,falseT:-24,wrongRule:-16,timeN:-20,timeC:-8,wrongN:-7,steady:10,start:50};
+const cv=document.getElementById('c'),cx=cv.getContext('2d');
+const QS=new URLSearchParams(location.search),TS=Math.max(1,Math.min(8,+(QS.get('ts')||1)));
+let S=1,DPR=1;
+function fit(){S=Math.min(innerWidth/W,innerHeight/H);DPR=Math.min(window.devicePixelRatio||1,2.5);
+  cv.style.width=(W*S)+'px';cv.style.height=(H*S)+'px';
+  cv.width=Math.max(1,Math.round(W*S*DPR));cv.height=Math.max(1,Math.round(H*S*DPR));}
+addEventListener('resize',fit);fit();
+
+/* ---------- small helpers ---------- */
+const clamp=(v,a,b)=>v<a?a:v>b?b:v,lerp=(a,b,t)=>a+(b-a)*t,seg=(t,a,b)=>clamp((t-a)/(b-a),0,1);
+const eo=t=>1-Math.pow(1-t,3),eob=t=>{const c=1.70158;return 1+(c+1)*Math.pow(t-1,3)+c*Math.pow(t-1,2);};
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function shuffle(a,r){a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(r()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}
+const pick=(a,r)=>a[Math.floor(r()*a.length)];
+const hashStr=s=>{let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;};
+const dateKey=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+const fmt=t=>{t=Math.max(0,t);const m=Math.floor(t/60),s=t-m*60;return m+':'+(s<10?'0':'')+s.toFixed(1);};
+function rr(x,y,w,h,r){cx.beginPath();cx.moveTo(x+r,y);cx.arcTo(x+w,y,x+w,y+h,r);cx.arcTo(x+w,y+h,x,y+h,r);cx.arcTo(x,y+h,x,y,r);cx.arcTo(x,y,x+w,y,r);cx.closePath();}
+function txt(s,x,y,sz,col,al,wt,ff){cx.font=(wt||800)+' '+sz+'px '+(ff||FONT);cx.fillStyle=col;cx.textAlign=al||'left';cx.textBaseline='middle';cx.fillText(s,x,y);}
+function circ(x,y,r,col){cx.fillStyle=col;cx.beginPath();cx.arc(x,y,r,0,6.2832);cx.fill();}
+function oct(x,y,r,col){cx.fillStyle=col;cx.beginPath();for(let i=0;i<8;i++){const a=Math.PI/8+i*Math.PI/4;cx.lineTo(x+Math.cos(a)*r,y+Math.sin(a)*r);}cx.closePath();cx.fill();}
+function star(x,y,r,col){cx.fillStyle=col;cx.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,q=i%2?r*.45:r;cx.lineTo(x+Math.cos(a)*q,y+Math.sin(a)*q);}cx.closePath();cx.fill();}
+function heart(x,y,s,col){cx.fillStyle=col;cx.beginPath();cx.moveTo(x,y+s*.9);cx.bezierCurveTo(x-s*1.5,y-s*.1,x-s*.8,y-s*1.1,x,y-s*.35);cx.bezierCurveTo(x+s*.8,y-s*1.1,x+s*1.5,y-s*.1,x,y+s*.9);cx.fill();}
+function bolt(x,y,s,col){cx.fillStyle=col;cx.beginPath();cx.moveTo(x+s*.2,y-s);cx.lineTo(x-s*.7,y+s*.15);cx.lineTo(x-s*.05,y+s*.15);cx.lineTo(x-s*.25,y+s);cx.lineTo(x+s*.7,y-s*.2);cx.lineTo(x+s*.05,y-s*.2);cx.closePath();cx.fill();}
+function glow(x,y,r,rgb,a){const g=cx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,'rgba('+rgb+','+a+')');g.addColorStop(1,'rgba('+rgb+',0)');cx.fillStyle=g;cx.fillRect(x-r,y-r,2*r,2*r);}
+function wrapText(s,maxW,sz,wt){cx.font=wt+' '+sz+'px '+FONT;const out=[];let l='';for(const w of s.split(' ')){const t=l?l+' '+w:w;if(cx.measureText(t).width>maxW&&l){out.push(l);l=w;}else l=t;}if(l)out.push(l);return out;}
+function fitSize(s,maxW,sz,min){cx.font='800 '+sz+'px '+FONT;while(sz>min&&cx.measureText(s).width>maxW){sz--;cx.font='800 '+sz+'px '+FONT;}return sz;}
+
+/* ---------- the eight rules (our own words; fact ids from bank/facts.json; CVC numbers from the facts' public_source) ---------- */
+const RK=['curb','bike','fourway','bus','phone','cross','lights','siren'],TRAPS=['curb','bike','fourway'];
+const RULES={
+  // facts s6_p11_run3-017 (red: no stopping, standing or parking), s6_p11_run3-008 (white: passengers only), s6_p11_run3-018 (blue: permits only). CVC 21458. ADULT TRAP.
+  curb:{label:'Curb colours',cvc:'CVC 21458',brief:'Red curb: never stop. White curb: passenger drop-off only. Blue curb: permit holders only.',
+    say:'Red: no stopping at all. White: quick passenger drop-off only. Blue: permit holders only.',ok:'A white curb allows a quick passenger drop-off. That driver did exactly that.'},
+  // facts s7b-23 and s8c-010 (leave at least 3 feet when passing a bicycle). CVC 21760. ADULT TRAP.
+  bike:{label:'Passing a cyclist',cvc:'CVC 21760',brief:'Passing a bicycle? Leave at least 3 feet between your car and the rider.',
+    say:'Pass a cyclist with at least 3 feet of room. Two feet is not enough.',ok:'Three feet or more is legal. That driver gave the rider enough room.'},
+  // facts s6_p11_roadway-001 (first vehicle to stop goes first) and s6_p11_roadway-002 (tie: the left car yields to the right car). CVC 21800. ADULT TRAP.
+  fourway:{label:'Four-way stop order',cvc:'CVC 21800',brief:'Four-way stop: the first car to stop goes first. A tie? The car on the right goes first.',
+    say:'First car to stop goes first. If two arrive together, the car on the right goes first.',ok:'That driver went in the right order. First to stop goes first; a tie goes right.'},
+  // fact s7_p11_roadway-002 (school bus red lights: stop both ways) and s6_p11_roadway-011 (far side of a divided road need not stop). CVC 22454.
+  bus:{label:'School bus',cvc:'CVC 22454',brief:'School bus, red lights on: stop both ways until the kids are across. Divided road? The far side may go.',
+    say:'School bus red lights on a normal road: stop both ways until the kids cross and the lights go off.',ok:'They stopped for the red lights. That is the rule, so no ticket.'},
+  // fact s8c-007 (adults may use a phone only hands-free). CVC 23123.
+  phone:{label:'Phone in hand',cvc:'CVC 23123',brief:'A phone held in your hand while driving is a ticket. Hands-free only.',
+    say:'Adults may use a phone only hands-free. A phone held in the hand while driving is a ticket.',ok:'Phone on a mount, both hands on the wheel: hands-free is legal.'},
+  // fact s6_p11_roadway-033 (never pass a vehicle stopped at a crosswalk). CVC 21951.
+  cross:{label:'Crosswalk',cvc:'CVC 21951',brief:'A car is stopped at a crosswalk? Never pass it. Someone may be crossing.',
+    say:'Never pass a car stopped at a crosswalk. Someone may be crossing in front of it.',ok:'They waited behind the stopped car. That is the rule, so no ticket.'},
+  // fact s6_p11_run2-023 (parking lights alone at night are illegal). CVC 24250.
+  lights:{label:'Night lights',cvc:'CVC 24250',brief:'At night, parking lights alone are illegal. Turn the headlights on.',
+    say:'At night, parking lights alone are illegal. Headlights must be on.',ok:'Headlights on at night. That is the rule, so no ticket.'},
+  // fact s6_p11_run2-008 (siren and lights approaching: pull to the right edge and stop). CVC 21806.
+  siren:{label:'Emergency siren',cvc:'CVC 21806',brief:'Siren and lights behind you? Pull to the right edge and stop until it passes.',
+    say:'Siren and lights coming: pull to the right edge and stop until it passes.',ok:'They pulled right and stopped. That is the rule, so no ticket.'}
+};
+const ROAST={curb:"You'd lose your license at the curb. Paint colours matter.",bike:"You'd lose your license passing a cyclist. Three feet. Three.",
+  fourway:"You'd lose your license at the four-way stop. It is not a staring contest.",bus:"You'd lose your license at the school bus.",
+  phone:"You'd lose your license with that phone in your hand.",cross:"You'd lose your license at the crosswalk. Someone was crossing.",
+  lights:"You'd lose your license driving at night on parking lights.",siren:"You'd lose your license the moment a siren showed up."};
+const BIKEW=['At least 3 feet of room','At least 2 feet of room','At least 5 feet of room'],PHONEW=['Only hands-free use is legal','Holding is fine at red lights','Texting only on empty roads'],
+  CROSSW=['Never pass a stopped car there','You may pass if you slow down','Pass on the left if it is clear'],LIGHTW=['Use headlights at night','Parking lights alone will do','Lights only on unlit roads'],SIRENW=['Pull to the right and stop','Speed up and clear the road','Stay in your lane and brake'];
+/* variants: bad = a violation; t = tier (1 easy, 2 tricky, 0 either); w = WHICH-rule options (correct one first; wrong ones are real misconceptions, lengths within a few characters);
+   why = why an innocent was fine. The talk (LINES) is one neutral pool per rule: it never tells the player the answer, and no driver name maps to a verdict. */
+const V={
+  curb:[
+    {bad:1,t:1,cc:'red',w:['Red curb: never stop here','Red curb: five minutes max','Red curb: loading zone only']},
+    {bad:1,t:2,cc:'blue',permit:0,w:['Blue curb: permit holders only','Blue curb: quick loading only','Blue curb: 30 minute parking']},
+    {bad:1,t:2,cc:'white',wait:1,w:['White curb: passenger stops only','White curb: limited parking','White curb: truck loading only']},
+    {bad:0,t:0,cc:'white',pax:1},
+    {bad:0,t:2,cc:'blue',permit:1,why:'The placard hung on the mirror. A blue curb is for permit holders, so no ticket.'}],
+  bike:[
+    {bad:1,t:1,gap:1,w:BIKEW},
+    {bad:1,t:2,gap:2,w:BIKEW},
+    {bad:0,t:1,gap:4,swerve:1},
+    {bad:0,t:2,gap:3,swerve:1,why:'Exactly 3 feet is legal. The rule says at least 3.'}],
+  fourway:[
+    {bad:0,t:1,side:'L',arr:'drv',go:'drv',why:'They stopped first, so they go first.'},
+    {bad:0,t:1,side:'L',arr:'oth',go:'oth',why:'The other car stopped first. Waiting was correct.'},
+    {bad:1,t:1,side:'L',arr:'oth',go:'drv',w:['Whoever stops first goes first','The car on the right goes first','The bigger car goes first']}, // side L: the other car is on the driver's left, so "the car on the right goes first" is NOT also true here
+    {bad:0,t:2,side:'L',arr:'tie',go:'drv',why:'A tie: the car on the right goes first. That driver was on the right.'},
+    {bad:0,t:2,side:'R',arr:'tie',go:'oth',why:'A tie: the car on the right goes first. Waiting was correct.'},
+    {bad:1,t:2,side:'R',arr:'tie',go:'drv',w:['A tie: the right car goes first','A tie: the left car goes first','A tie: the bigger car goes first']}],
+  bus:[
+    {bad:1,t:0,mode:'pass',w:['Stop both ways till kids cross','Slow down and pass them carefully','Stop only if you are behind it']},
+    {bad:0,t:0,mode:'stop'},
+    {bad:0,t:2,mode:'div',why:'A bus on the far side of a divided road? You need not stop.'},
+    {bad:1,t:2,mode:'pass2',w:['Stop both ways till kids cross','Slow down and pass them carefully','Stop only if you are behind it']}], // pass2: overtakes the stopped bus from behind, through the other lane
+  phone:[
+    {bad:1,t:1,mode:'ear',w:PHONEW},
+    {bad:1,t:2,mode:'lap',w:PHONEW},
+    {bad:0,t:0,mode:'mount'}],
+  cross:[
+    {bad:1,t:0,mode:'pass',w:CROSSW},
+    {bad:1,t:2,mode:'pass',kid:1,w:CROSSW},
+    {bad:0,t:0,mode:'wait'},
+    {bad:0,t:2,mode:'wait',kid:1}],
+  lights:[
+    {bad:1,t:1,mode:'park',w:LIGHTW},
+    {bad:1,t:2,mode:'park',off:1,w:LIGHTW},
+    {bad:0,t:0,mode:'beams'}],
+  siren:[
+    {bad:1,t:1,mode:'ignore',w:SIRENW},
+    {bad:1,t:2,mode:'block',w:SIRENW},
+    {bad:0,t:0,mode:'yield'}]
+};
+const SHOW1={curb:0,bike:0,fourway:2,bus:0,phone:0,cross:0,lights:0,siren:0}; // index of the bad t1 variant shown in the briefing
+/* ---------- people: five regulars who come back, plus one-off drivers ---------- */
+const DRIVERS=[
+  {id:'dave',name:'Dave',col:'#e0463f',kind:'pickup',desc:'red pickup',rule:'curb',greet:'Evening, boss! Fine night for it.',sit:['Two minutes, tops. Hazards are on.','Hazards on, boss. Same as ever.']},
+  {id:'okafor',name:'Mrs. Okafor',col:'#2aa7a1',kind:'van',desc:'teal minivan',rule:'bus',greet:'Oh, hello, officer! I am so late!',sit:['My daughter is waiting for me.','Same school run. Same rush, officer.']},
+  {id:'priya',name:'Priya',col:'#f2c230',kind:'hatch',desc:'yellow hatchback',rule:'phone',greet:'Hey! Rideshare driver. Five stars!',sit:['It is the app, officer. Important.','A customer is waiting. Important.']},
+  {id:'tony',name:'Big Tony',col:'#e8833a',kind:'compact',desc:'orange compact',rule:'fourway',greet:'Officer. Rough night, huh?',sit:['I know this stop like my hand.','Nobody is out here. Nobody.']},
+  {id:'lena',name:'Lena',col:'#9a6be0',kind:'sedan',desc:'purple sedan',rule:'lights',greet:'Mm... sorry, officer. Long shift.',sit:['I cannot see a thing tonight.','Long night. I just want bed.']}
+];
+const MEMLINES={
+  rightTicket:['You ticketed me last time. Fair.','That ticket stung. I am careful now.','You got me before. Not today.'],
+  wrongTicket:['You ticketed me for NOTHING. Remember?','Still mad about that ticket, officer.','Same officer? Watch yourself.'],
+  rightPass:['Thanks for last time, officer!','You were kind to me earlier. Thanks!'],
+  wrongPass:['You let me off last time. Ha!','Worked last time, did it not?','Same officer! You are easy.'],
+  timeout:['You froze last time. Do not freeze now.','Last time you just stared at me.']
+};
+const PAL=[['red','#e0463f'],['teal','#2aa7a1'],['yellow','#f2c230'],['orange','#e8833a'],['purple','#9a6be0'],['blue','#4c8be0'],['white','#e4e8ef'],['green','#4fb56b']];
+const LINES={ // one pool per rule, used for guilty and innocent drivers alike: the talk never gives the verdict away (critic round 1, spec E)
+  curb:[['Marcus','Just dropping off a package!','Thirty seconds. Hazards are on.'],['Gran Ruth','I always stop here, dear.','Nobody ever minds, you know.'],['Hector','Is this spot a problem?','I am only reading my map.'],['Ivy','Long night. Short stop.','Hazards are blinking, see?'],['Kofi','My GPS said to stop here.','It is a quiet block anyway.']],
+  bike:[['Lucia','Cold night for a ride.','I slowed down, officer.'],['Winston','Bikes everywhere these days.','At least he has lights.'],['Bea','Cyclists are so quiet at night.','I never hear them coming.'],['Cyrus','Narrow road tonight.','He is riding steady.'],['Dalia','Nobody else out here.','Quiet street, huh?']],
+  fourway:[['Nico','Quiet corner tonight.','I know this street.'],['Faye','Four signs. Four!','Who designs these?'],['Gus','I drive this street daily.','Never once had trouble.'],['Ravi','My GPS says I am late.','Almost there.'],['Tara','Cold night, officer.','Roads are empty.']],
+  bus:[['Brett','Busy road tonight.','I have somewhere to be.'],['Dr. Ng','Long surgery tonight, officer.','Please. I am very tired.'],['Sam','Long day. Longer street.','I only just got here.'],['Lou','Yellow buses everywhere.','This road is always busy.'],['Mara','School night, right?','Those lights are so bright.']],
+  phone:[['Devon','Mom is calling. She never stops.','Two seconds, officer.'],['Ines','My GPS is acting weird tonight.','Please do not make me late.'],['Rhea','Back in my day we had maps.','I was just humming along.'],['Chloe','Long drive. Longer night.','Almost home now.'],['Raj','Traffic was awful today.','I am almost home.']],
+  cross:[['Arlo','Late for my night class!','Traffic here is endless.'],['Zed','Who even uses this crosswalk?','Folks should be home by now.'],['Joan','Quiet street tonight.','I mind my own lane.'],['Pat','Cold night for a walk.','Streets are so empty.'],['Tess','It is a short street.','I will be gone in a minute.']],
+  lights:[['Ollie','Late-night snack run, officer.','Everything is closed anyway.'],['Pia','Foggy out here tonight.','Pretty quiet, though.'],['Reed','Can a guy not drive in peace?','It is a quiet night.'],['Cole','Dark out here tonight.','I know these roads by heart.'],['Vera','Night driving is my thing.','Quiet roads. Good music.']],
+  siren:[['Ike','Great song on the radio.','I love this station.'],['Joy','Everybody is in a hurry tonight.','I have a long way to go.'],['Wes','Rainy night, officer.','Roads are slick out here.'],['Gabe','Busy night, officer.','Everybody is going somewhere.'],['Nora','Long shift tonight.','I hope everyone is okay.']]
+};
+
+/* ---------- tiny audio: two synthesised sounds, unlocked on the first tap ---------- */
+let AC=null;
+function unlock(){try{if(navigator.audioSession)navigator.audioSession.type='playback';}catch(e){} /* iOS: play through the silent switch (wiki green-light-audio-engine) */ if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();}catch(e){AC=null;}}if(AC&&AC.state==='suspended')AC.resume().catch(()=>{});}
+function tone(f0,f1,d,type,vol,dl){if(!AC)return;try{const t=AC.currentTime+(dl||0),o=AC.createOscillator(),g=AC.createGain();o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+d);g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+d+.03);}catch(e){}}
+const sfx={ticket(){tone(640,1000,.14,'sawtooth',.05);tone(1000,640,.16,'sawtooth',.05,.14);},wrong(){tone(170,60,.32,'square',.07);}};
+
+/* ---------- drawing parts: cars, bus, people, cyclist, ambulance (top-down, night) ---------- */
+const KIND={sedan:62,pickup:72,van:68,hatch:56,compact:52};
+function car(x,y,col,o){o=o||{};const c=cx,L=KIND[o.kind]||62,Wd=30;
+  c.save();c.translate(x,y);if(o.rot)c.rotate(o.rot);if(o.dir<0)c.scale(-1,1);
+  if(o.beams){const g=c.createLinearGradient(L/2,0,L/2+140,0);g.addColorStop(0,'rgba(255,246,200,.62)');g.addColorStop(1,'rgba(255,246,200,0)');c.fillStyle=g;c.beginPath();c.moveTo(L/2-2,-10);c.lineTo(L/2+140,-52);c.lineTo(L/2+140,52);c.lineTo(L/2-2,10);c.closePath();c.fill();}
+  c.fillStyle='rgba(0,0,0,.4)';rr(-L/2+2,-Wd/2+4,L,Wd,9);c.fill();
+  c.fillStyle=col;rr(-L/2,-Wd/2,L,Wd,9);c.fill();
+  if(o.kind==='pickup'){c.fillStyle='rgba(0,0,0,.28)';rr(-L/2+3,-Wd/2+3,L*.36,Wd-6,4);c.fill();}
+  c.fillStyle='rgba(0,0,0,.24)';rr(-L*.14,-Wd/2+4,L*(o.kind==='van'?.52:.36),Wd-8,6);c.fill();
+  c.fillStyle='#1b2536';c.beginPath();c.moveTo(L*.2,-Wd/2+4);c.lineTo(L*.34,-Wd/2+7);c.lineTo(L*.34,Wd/2-7);c.lineTo(L*.2,Wd/2-4);c.closePath();c.fill();
+  rr(-L*.34,-Wd/2+6,L*.08,Wd-12,2);c.fill();
+  c.fillStyle=o.park?'#a8741a':'#fff6c8';rr(L/2-5,-Wd/2+3,5,7,2);c.fill();rr(L/2-5,Wd/2-10,5,7,2);c.fill();
+  c.fillStyle=o.brake?'#ff3b30':'#7a1c1c';rr(-L/2,-Wd/2+3,4,7,2);c.fill();rr(-L/2,Wd/2-10,4,7,2);c.fill();
+  if(o.brake){glow(-L/2-4,-Wd/2+6,16,'255,50,40',.7);glow(-L/2-4,Wd/2-6,16,'255,50,40',.7);}
+  if(o.haz){for(const sx of [-1,1])for(const sy of [-1,1]){circ(sx*(L/2-3),sy*(Wd/2-3),3.2,'#ffb020');glow(sx*(L/2-3),sy*(Wd/2-3),16,'255,170,30',.8);}}
+  c.restore();}
+function bus(x,y,fl,arm){const c=cx;c.save();c.translate(x,y);
+  c.fillStyle='rgba(0,0,0,.4)';rr(-60,-15,124,40,8);c.fill();
+  c.fillStyle='#f5b900';rr(-62,-19,124,38,8);c.fill();
+  c.fillStyle='rgba(255,255,255,.3)';for(let i=0;i<5;i++){rr(-50+i*20,-14,14,8,2);c.fill();rr(-50+i*20,6,14,8,2);c.fill();}
+  c.fillStyle='#d99a00';c.fillRect(-52,-2,100,4);
+  c.fillStyle='#1b2536';c.beginPath();c.moveTo(50,-16);c.lineTo(60,-12);c.lineTo(60,12);c.lineTo(50,16);c.closePath();c.fill();
+  for(const sx of [-1,1])for(const sy of [-1,1]){const lit=(sy<0)===(fl===0);circ(sx*54,sy*13,4,lit?'#ff2d2d':'#5a1010');if(lit)glow(sx*54,sy*13,24,'255,50,50',.75);}
+  if(arm){c.strokeStyle='#222';c.lineWidth=2;c.beginPath();c.moveTo(-30,-19);c.lineTo(-30,-30);c.stroke();oct(-30,-38,9,'#e02424');c.fillStyle='#fff';c.fillRect(-34,-39,8,2.4);}
+  c.restore();}
+function ped(x,y,kid,col){const c=cx;c.save();c.translate(x,y);
+  c.fillStyle='rgba(0,0,0,.35)';c.beginPath();c.ellipse(1,2,kid?7:9,5,0,0,6.3);c.fill();
+  c.fillStyle=col||'#e86a92';c.beginPath();c.ellipse(0,0,kid?6:8,kid?4:5,0,0,6.3);c.fill();
+  if(kid){c.fillStyle='#4aa3ff';rr(-4,1,8,5,2);c.fill();}
+  circ(0,-1,kid?3.6:4.6,'#e0b08a');circ(0,0,kid?3:4,'#2a2020');
+  c.restore();}
+function amb(x,y,t){const c=cx;c.save();c.translate(x,y);
+  c.fillStyle='rgba(0,0,0,.4)';rr(-42,-13,88,34,8);c.fill();
+  c.fillStyle='#f1f4fa';rr(-44,-17,88,34,8);c.fill();
+  c.fillStyle='#e03a3a';c.fillRect(-36,-3,50,6);c.fillRect(-14,-8,6,16);
+  c.fillStyle='#1b2536';c.beginPath();c.moveTo(32,-14);c.lineTo(42,-10);c.lineTo(42,10);c.lineTo(32,14);c.closePath();c.fill();
+  const ph=Math.floor(t*8)%2;
+  glow(16,-9,56,'255,40,40',ph?.75:.1);glow(16,9,56,'50,110,255',ph?.1:.75);
+  c.fillStyle=ph?'#ff3030':'#6b1717';c.fillRect(13,-14,6,13);c.fillStyle=ph?'#16306b':'#4d8dff';c.fillRect(13,1,6,13);
+  c.restore();}
+function cyclist(x,y,t){const c=cx;c.save();c.translate(x,y);
+  c.fillStyle='rgba(0,0,0,.35)';c.beginPath();c.ellipse(1,3,17,9,0,0,6.3);c.fill();
+  c.strokeStyle='#cfd5e3';c.lineWidth=2.2;c.beginPath();c.ellipse(-13,0,9,2.6,0,0,6.3);c.stroke();c.beginPath();c.ellipse(13,0,9,2.6,0,0,6.3);c.stroke();
+  c.strokeStyle='#4aa3ff';c.lineWidth=3;c.beginPath();c.moveTo(-13,0);c.lineTo(13,0);c.stroke();
+  c.strokeStyle='#cfd5e3';c.lineWidth=2.4;c.beginPath();c.moveTo(11,-7);c.lineTo(11,7);c.stroke();
+  c.strokeStyle='#ff7a59';c.lineWidth=2.6;c.beginPath();c.moveTo(0,-6);c.lineTo(11,-6.5);c.moveTo(0,6);c.lineTo(11,6.5);c.stroke();
+  c.fillStyle='#ff7a59';c.beginPath();c.ellipse(-2,0,5,8.5,0,0,6.3);c.fill();
+  const w=Math.sin(t*9)*3;circ(-6,w,2,'#222');circ(-6,-w,2,'#222');circ(2,0,4.8,'#ffd54a');
+  c.restore();}
+function bigPed(x,y,kid,col,s){cx.save();cx.translate(x,y);cx.scale(s,s);ped(0,0,kid,col);cx.restore();} // pedestrians carry verdicts: draw them 1.4 to 1.5 times larger
+function stopSign(x,y){cx.fillStyle='#8a90a0';cx.fillRect(x-1.5,y,3,10);oct(x,y,8,'#d62b2b');cx.strokeStyle='#fff';cx.lineWidth=1;cx.beginPath();for(let i=0;i<8;i++){const a=Math.PI/8+i*Math.PI/4;cx.lineTo(x+Math.cos(a)*6.6,y+Math.sin(a)*6.6);}cx.closePath();cx.stroke();}
+function pill(x,y,w,h,col,s,tc,sz){rr(x,y,w,h,h/2);cx.fillStyle=col;cx.fill();txt(s,x+w/2,y+h/2+.5,sz||10,tc||'#0a0f1e','center',900);}
+
+/* ---------- the replay scenes: 330x196 tiles, looped, drawn on the card ---------- */
+const SW=330,SH=196,PER=3.6,SC={};
+const bgA=()=>{cx.fillStyle='#232630';cx.fillRect(0,0,SW,SH);};
+function walk(y0,y1,x0,x1){x0=x0||0;x1=x1||SW;cx.fillStyle='#474d5c';cx.fillRect(x0,y0,x1-x0,y1-y0);cx.strokeStyle='rgba(0,0,0,.28)';cx.lineWidth=1;cx.beginPath();for(let x=x0+((22-x0%22)%22);x<x1;x+=22){cx.moveTo(x,y0);cx.lineTo(x,y1);}cx.stroke();}
+function dash(y,off,col,x0,x1){cx.strokeStyle=col||'#d8c35c';cx.lineWidth=3;cx.setLineDash([16,14]);cx.lineDashOffset=-(off||0);cx.beginPath();cx.moveTo(x0||0,y);cx.lineTo(x1||SW,y);cx.stroke();cx.setLineDash([]);}
+function lamp(x,y){glow(x,y,46,'255,214,120',.3);circ(x,y,3,'#ffe9a8');}
+function mkTrack(x0,vfn){const n=Math.ceil(PER*120)+2,a=new Float32Array(n);let x=x0;for(let i=0;i<n;i++){a[i]=x;x+=vfn(i/120)/120;}return a;}
+const at=(a,t)=>a[Math.min(a.length-1,Math.max(0,Math.round(t*120)))];
+const TR={ign:mkTrack(70,()=>60),yld:mkTrack(70,v=>v<.6?60:lerp(60,0,seg(v,.6,1.6)))};
+const CURBC={red:'#e2332f',white:'#e8ecf4',blue:'#2f6fe0'};
+SC.curb=(t,c)=>{const tl=t%PER,v=c.v,cc=v.cc;
+  bgA();walk(0,30);dash(72,0);
+  cx.fillStyle=CURBC[cc];cx.fillRect(0,148,SW,22);
+  if(cc==='red'){cx.strokeStyle='rgba(255,255,255,.22)';cx.lineWidth=4;cx.beginPath();for(let x=-20;x<SW;x+=18){cx.moveTo(x,170);cx.lineTo(x+14,148);}cx.stroke();}
+  cx.fillStyle='rgba(0,0,0,.35)';cx.fillRect(0,170,SW,3);walk(173,SH);lamp(40,184);lamp(280,184);
+  if(cc==='blue'){cx.fillStyle='#8a90a0';cx.fillRect(268,180,3,16);cx.fillStyle='#2f6fe0';rr(257,162,25,25,4);cx.fill();circ(266,169,2.4,'#fff');cx.strokeStyle='#fff';cx.lineWidth=2;cx.beginPath();cx.moveTo(266,172);cx.lineTo(266,178);cx.lineTo(272,178);cx.stroke();cx.beginPath();cx.arc(266,179,4,0,6.3);cx.stroke();}
+  const p=eo(seg(tl,0,1.0));
+  car(lerp(-70,164,p),130,c.col,{kind:c.kind,brake:p>.05&&p<.97,haz:tl>1.0&&Math.floor(tl*3)%2===0});
+  if(v.pax&&tl>.9)bigPed(184,lerp(149,186,eo(seg(tl,.9,2.3))),false,'#e86a92',1.6); // the passenger, drawn big
+  // the pills only state what is happening, in one neutral style; they never say whether it is allowed
+  if(v.wait&&tl>.9){for(let k=0;k<3;k++){const q=(tl*1.4+k*.33)%1;circ(112-q*20,126+k*5-q*8,3+q*3,'rgba(190,200,215,'+(.5-q*.5)+')');}pill(104,90,120,24,'#0b0e14','WAITING 20 MIN','#ffb020',12);}
+  if(cc==='blue'&&tl>.9)pill(92,90,142,24,'#0b0e14',v.permit?'PLACARD: ON MIRROR':'PLACARD: NONE','#ffb020',12);};
+SC.bike=(t,c)=>{const tl=t%PER,v=c.v,cyY=146,gp=v.gap*7,tgt=cyY-8-gp-15,y0=cyY-8-5-15;
+  bgA();walk(0,22);dash(80,0);cx.fillStyle='#8a909c';cx.fillRect(0,170,SW,4);walk(174,SH);cx.fillStyle='rgba(255,255,255,.5)';cx.fillRect(0,166,SW,2);
+  const bx=70+tl*38,carX=-90+tl*190,carY=v.swerve?lerp(y0,tgt,eo(seg(tl,.1,.6))):tgt;
+  cyclist(bx,cyY,tl);car(carX,carY,c.col,{kind:c.kind});
+  const near=Math.abs(carX-bx)<(KIND[c.kind]||62)/2+10; // the car is alongside the rider
+  if(near){const bY=carY+15,tY=cyY-8;cx.strokeStyle='#ffd54a';cx.lineWidth=2;cx.beginPath();cx.moveTo(bx,bY);cx.lineTo(bx,tY);cx.moveTo(bx-6,bY);cx.lineTo(bx+6,bY);cx.moveTo(bx-6,tY);cx.lineTo(bx+6,tY);cx.stroke();}
+  if(tl>.5)pill(SW/2-62,170,124,22,'#ffd54a','GAP  '+v.gap+' FT','#0a0f1e',14);};
+SC.fourway=(t,c)=>{const P4=4.2,tl=t%P4,v=c.v,L=KIND[c.kind]||62,oF=v.arr==='oth',tie=v.arr==='tie',R=v.side==='R';
+  bgA();walk(0,66,0,130);walk(0,66,200,SW);walk(130,SH,0,130);walk(130,SH,200,SW);
+  dash(98,0,'#d8c35c',0,130);dash(98,0,'#d8c35c',200,SW);
+  cx.strokeStyle='#d8c35c';cx.lineWidth=3;cx.setLineDash([16,14]);cx.beginPath();cx.moveTo(165,0);cx.lineTo(165,66);cx.moveTo(165,130);cx.lineTo(165,SH);cx.stroke();cx.setLineDash([]);
+  cx.fillStyle='#f0f0f0';cx.fillRect(168,132,32,4);cx.fillRect(124,100,4,30);cx.fillRect(202,66,4,30);
+  stopSign(212,148);stopSign(112,146);stopSign(222,52);stopSign(118,50); // four stop signs, one per approach
+  const aD=oF?.7:tie?.55:.35,aO=oF?.35:tie?.55:.7,dGo=v.go==='drv'?1.0:2.2,oGo=v.go==='oth'?1.0:2.2; // arrival badges by 0.8 s, the first car moves at 1.0 s
+  const yS=134+L/2+3,pD=seg(tl,dGo,dGo+1.3),yD=tl<dGo?lerp(SH+L,yS,eo(seg(tl,0,aD))):lerp(yS,-100,pD*(.4+.6*pD));
+  const xS=R?206+L/2+3:124-L/2-3,pO=seg(tl,oGo,oGo+1.4),xE=R?SW+L+20:-L-20,xO=tl<oGo?lerp(xE,xS,eo(seg(tl,0,aO))):lerp(xS,R?-100:430,pO*(.4+.6*pO));
+  const oy=R?82:114;
+  car(xO,oy,'#c9ced9',{kind:'sedan',dir:R?-1:1,brake:tl>aO&&tl<oGo});
+  car(182,yD,c.col,{kind:c.kind,rot:-Math.PI/2,brake:tl>aD&&tl<dGo});
+  const bd=tie?['TIE','TIE']:oF?['2ND','1ST']:['1ST','2ND'];
+  if(tl>aD+.1)pill(122,yS-10,40,20,'#ffd54a',bd[0],'#0a0f1e',12);
+  if(tl>aO+.1)pill(xS-20,R?oy-44:oy+22,40,20,'#ffd54a',bd[1],'#0a0f1e',12);};
+SC.bus=(t,c)=>{const tl=t%PER,m=c.v.mode,fl=Math.floor(tl*4)%2;
+  bgA();walk(0,22);walk(176,SH);
+  if(m==='div'){cx.fillStyle='#2f5d3d';cx.fillRect(0,84,SW,28);cx.fillStyle='#8c93a3';cx.fillRect(0,82,SW,3);cx.fillRect(0,111,SW,3);
+    for(let x=14;x<SW;x+=46){circ(x,98,8,'#3f8a54');circ(x-2,96,4,'#58a86e');}}
+  else{cx.fillStyle='#d8c35c';cx.fillRect(0,96,SW,2.5);cx.fillRect(0,101,SW,2.5);} // double yellow = an undivided road
+  bus(150,137,fl,true);
+  if(m==='div'){for(let k=0;k<3;k++)bigPed(219+k*16,178-Math.abs(Math.sin(tl*3+k))*4,true,['#ff7a59','#59c3ff','#9be564'][k],1.4);}
+  else{bigPed(227,lerp(184,18,seg(tl,.3,3.5)),true,'#ff7a59',1.4);bigPed(243,lerp(192,26,seg(tl,.5,3.5)),true,'#59c3ff',1.4);}
+  if(m==='pass')car(420-tl*200,58,c.col,{kind:c.kind,dir:-1});
+  else if(m==='pass2')car(-70+tl*200,58,c.col,{kind:c.kind});
+  else if(m==='stop'){const p=eo(seg(tl,.1,1.2));car(lerp(430,296,p),58,c.col,{kind:c.kind,dir:-1,brake:p>.3});} // stops short of the crossing kids (their path is x 227 to 241)
+  else car(400-tl*125,58,c.col,{kind:c.kind,dir:-1});};
+SC.phone=(t,c)=>{const tl=t%PER,m=c.v.mode;
+  bgA();dash(20,tl*160);dash(176,tl*160);
+  cx.save();cx.translate(165,98);
+  cx.fillStyle='rgba(0,0,0,.4)';rr(-124,-54,252,120,30);cx.fill();
+  cx.fillStyle=c.col;rr(-126,-59,252,118,30);cx.fill();
+  cx.fillStyle='#0f121a';rr(-104,-47,172,94,20);cx.fill();
+  cx.fillStyle='rgba(255,255,255,.14)';rr(74,-47,46,94,14);cx.fill();
+  cx.fillStyle='#25344f';cx.beginPath();cx.moveTo(56,-46);cx.lineTo(74,-42);cx.lineTo(74,42);cx.lineTo(56,46);cx.closePath();cx.fill();
+  cx.fillStyle='#2b3142';rr(-64,-46,30,40,9);cx.fill();rr(-64,6,30,40,9);cx.fill();rr(-100,-46,22,92,8);cx.fill();
+  cx.fillStyle='#1a1f2c';rr(34,-46,20,92,8);cx.fill();
+  cx.strokeStyle='#8e98ad';cx.lineWidth=4;cx.beginPath();cx.arc(16,-26,13,0,6.3);cx.stroke();
+  const lean=m==='lap'?4+Math.sin(tl*5)*1.5:0,hx=-45+lean,hy=-26,shirt='#cfd5e3',pulse=.7+.3*Math.sin(tl*9);
+  let rx=12,ry=-14;
+  if(m==='ear'){const p=eo(seg(tl,.2,.8));rx=lerp(12,-40,p);ry=-14;}else if(m==='lap'){rx=24;ry=4;}
+  cx.lineCap='round';cx.lineWidth=7;cx.strokeStyle=shirt;
+  cx.beginPath();cx.moveTo(-46,-42);cx.lineTo(12,-38);cx.stroke();
+  cx.beginPath();cx.moveTo(-46,-10);cx.lineTo(rx,ry);cx.stroke();cx.lineCap='butt';
+  cx.fillStyle=shirt;cx.beginPath();cx.ellipse(-46,-26,8,17,0,0,6.3);cx.fill();
+  circ(hx,hy,10,'#e0b08a');cx.fillStyle='#2a2020';cx.beginPath();cx.arc(hx-1,hy,10,Math.PI*.55,Math.PI*1.45);cx.fill();
+  circ(12,-38,3.4,'#e0b08a');if(m==='mount')circ(12,-14,3.4,'#e0b08a');
+  if(m==='ear'){const p=seg(tl,.3,.8);glow(rx,ry,50,'190,225,255',.8*pulse*p);cx.save();cx.translate(rx,ry+1);cx.rotate(-.35);cx.fillStyle='#0b0e14';rr(-9,-4,18,8,2);cx.fill();cx.fillStyle='#eaf6ff';rr(-7,-2.4,12,4.8,1.5);cx.fill();cx.restore();circ(rx+1,ry+3,3.2,'#e0b08a');}
+  else if(m==='lap'){glow(rx,ry,52,'190,225,255',.85*pulse);glow(hx,hy,30,'190,225,255',.4*pulse);cx.fillStyle='#0b0e14';rr(rx-7,ry-12,14,24,3);cx.fill();cx.fillStyle='#eaf6ff';rr(rx-5.5,ry-10,11,20,2);cx.fill();circ(rx-6,ry+8,3.2,'#e0b08a');}
+  else{circ(12,-14,3.4,'#e0b08a');glow(42,-6,30,'120,180,255',.55);cx.fillStyle='#0b0e14';rr(37,-14,10,17,2);cx.fill();cx.fillStyle='#5aa9ff';rr(38.5,-12,7,13,1.5);cx.fill();
+    for(let k=0;k<3;k++){const r=10+((tl*40+k*12)%36);cx.strokeStyle='rgba(130,200,255,'+(1-(r-10)/36)*.8+')';cx.lineWidth=2;cx.beginPath();cx.arc(hx+6,hy,r,-.7,.7);cx.stroke();}}
+  cx.restore();};
+SC.cross=(t,c)=>{const tl=t%PER,m=c.v.mode;
+  bgA();walk(0,24);walk(172,SH);dash(96,0);
+  cx.fillStyle='rgba(240,240,240,.85)';for(let y=28;y<168;y+=14)cx.fillRect(196,y,44,7);
+  car(lerp(-60,146,eo(seg(tl,0,.7))),132,'#c9ced9',{kind:'sedan',brake:true});
+  let py;if(tl<.2)py=192;else if(tl<1.2)py=lerp(192,104,seg(tl,.2,1.2));else if(m==='pass'&&tl<2.4)py=104;else py=lerp(104,22,seg(tl,m==='pass'?2.4:1.2,m==='pass'?3.4:2.8));
+  bigPed(218,py,!!c.v.kid,c.v.kid?'#59c3ff':'#e86a92',1.5);
+  if(m==='pass'){car(-70+230*Math.max(0,tl-.2),66,c.col,{kind:c.kind});if(tl>1.2&&tl<2.4){circ(236,py-14,8,'#ff3b30');txt('!',236,py-13,13,'#fff','center',900);}}
+  else{const p=eo(seg(tl,.2,1.3));car(lerp(-80,115-(KIND[c.kind]||62)/2-8,p),132,c.col,{kind:c.kind,brake:p>.35});} // waits BEHIND the stopped car, in its own lane
+};
+SC.lights=(t,c)=>{const tl=t%PER,b=c.v.mode==='beams';
+  const road=()=>{bgA();walk(0,34);walk(168,SH);dash(100,0);};
+  road();cx.fillStyle=b?'rgba(3,5,12,.78)':'rgba(3,5,12,.9)';cx.fillRect(0,0,SW,SH);lamp(60,20);lamp(260,20);
+  const x=lerp(50,430,seg(tl,0,3.3)),y=122; // already on screen at t=0, so the lights are readable at once
+  if(b){cx.save();cx.beginPath();cx.moveTo(x+28,y-10);cx.lineTo(x+190,y-62);cx.lineTo(x+190,y+62);cx.lineTo(x+28,y+10);cx.closePath();cx.clip();road();
+    const g=cx.createLinearGradient(x+28,0,x+190,0);g.addColorStop(0,'rgba(3,5,12,0)');g.addColorStop(1,'rgba(3,5,12,.85)');cx.fillStyle=g;cx.fillRect(0,0,SW,SH);cx.restore();}
+  const off=!!c.v.off;cx.save();cx.globalAlpha=b?1:.62;car(x,y,c.col,{kind:c.kind,beams:b,park:!b&&!off});cx.restore();
+  if(!b&&!off){glow(x+30,y-10,13,'255,170,40',.7);glow(x+30,y+10,13,'255,170,40',.7);}};
+SC.siren=(t,c)=>{const tl=t%PER,y_=c.v.mode==='yield',bl=c.v.mode==='block'; // block = stops in the lane instead of pulling right
+  bgA();walk(0,30);walk(172,SH);dash(98,0);cx.fillStyle='#8a909c';cx.fillRect(0,168,SW,4);
+  const cy=y_?lerp(124,152,eo(seg(tl,.5,1.3))):124;
+  car(at(y_||bl?TR.yld:TR.ign,tl),cy,c.col,{kind:c.kind,brake:(y_||bl)&&tl>1.2});
+  const ay=y_?108:(tl<.5?124:lerp(124,66,eo(seg(tl,.5,1.2))));
+  amb(-120+230*Math.max(0,tl-.1),ay,tl);
+  cx.fillStyle=Math.floor(tl*8)%2?'rgba(255,40,40,.09)':'rgba(40,90,255,.09)';cx.fillRect(0,0,SW,SH);};
+
+/* The cue that shows each variant's verdict, aligned with V[rule]: [time in s, box [x,y,w,h] in tile pixels, twin variant index or none].
+   Appear cue (no twin): something enters or moves in the box at that time. Twin cue: the variant differs from its opposite-verdict twin in the box at that time.
+   check.js calls __po.cueTest(): it re-draws every variant and counts changed pixels, so each cue is proven visible. */
+const CUE={
+  curb:[[0,[0,148,330,22],3],[.9,[88,86,150,32]],[.9,[100,86,128,32]],[.9,[168,138,34,58]],[.9,[88,86,150,32]]],
+  bike:[[.5,[100,166,130,28]],[.5,[100,166,130,28]],[.5,[100,166,130,28]],[.5,[100,166,130,28]]],
+  fourway:[[1,[60,50,210,146]],[1,[60,50,210,146]],[1,[60,50,210,146]],[1,[60,50,210,146]],[1,[60,50,210,146]],[1,[60,50,210,146]]],
+  bus:[[1.1,[140,40,200,40],1],[1.1,[140,40,200,40],0],[0,[0,80,330,36],1],[.9,[60,40,170,40]]], // pass vs stop differ once the offender reaches the bus (1.0 s) or stops (1.1 s)
+  phone:[[.5,[100,40,120,70]],[0,[150,40,110,110],2],[0,[150,40,110,110],1]],
+  cross:[[1.2,[190,60,70,60]],[1.2,[190,60,70,60]],[1.3,[20,40,300,120],0],[1.3,[20,40,300,120],1]],
+  lights:[[0,[0,40,330,130],2],[0,[0,40,330,130],2],[0,[0,40,330,130],0]],
+  siren:[[1.2,[0,60,330,120],2],[1.3,[0,60,330,120],2],[.7,[30,142,260,26]]] // yield: the car moves into the curb lane (box = the curb lane only)
+};
+/* REVEAL[rule] = when a fast call can use the cue = the latest cue of the rule + 0.25 s (appear) or + 0.1 s (twin). A card enters for 0.4 s, so a fast call (inside
+   55 percent of the timer) needs reveal <= 0.05 + 0.55 * limit with a 0.35 s reaction; check.js asserts it for every car of 336 shifts (tightest limit 3.04 s -> 1.72 s). */
+const REVEAL={};for(const k of RK)REVEAL[k]=+Math.max(...CUE[k].map(c=>c[2]!==undefined?c[0]+.1:c[0]+.25)).toFixed(2);
+/* ---------- the seeded shift: the same 20 cars for everyone on a given day ---------- */
+const PAT=[0,1,0,2,1,3,2,4,3,5,4,6,5,7,6,7],WH=i=>i%3===2; // rule slots: each rule is briefed, asked soon, asked again later
+function makeShift(seed){
+  const r=mulberry32(seed);let rules=null;
+  for(let a=0;a<400;a++){
+    const ord=shuffle(RK,r),third=shuffle(TRAPS.concat([pick(RK.filter(k=>TRAPS.indexOf(k)<0),r)]),r);
+    rules=PAT.map(p=>ord[p]).concat(third);
+    if(rules.some((k,i)=>i>0&&k===rules[i-1]))continue;
+    const f={},l={};rules.forEach((k,i)=>{if(f[k]===undefined)f[k]=i;l[k]=i;});
+    if(DRIVERS.some(d=>l[d.rule]-f[d.rule]<3))continue;
+    break;}
+  const ask=[],first={},last={},cnt={};
+  rules.forEach((k,i)=>{cnt[k]=(cnt[k]||0)+1;ask.push(cnt[k]);if(first[k]===undefined)first[k]=i;last[k]=i;});
+  let g=null;
+  for(let a=0;a<800;a++){ // every rule gets at least one guilty and one innocent car; WHICH slots are mostly guilty (3 to 5 of 6), so "ticket every third car" is not a free pattern
+    g=new Array(NCARS).fill(false);
+    for(const k of RK){const idx=[];rules.forEach((q,i)=>{if(q===k)idx.push(i);});
+      idx.forEach(i=>{g[i]=r()<(WH(i)?.75:.5);});
+      if(!idx.some(i=>g[i]))g[pick(idx,r)]=true;else if(!idx.some(i=>!g[i]))g[pick(idx,r)]=false;}
+    const n=g.filter(Boolean).length,wg=g.filter((x,i)=>x&&WH(i)).length;if(n<10||n>13||wg<3||wg>5)continue;
+    let run=1,mx=1;for(let i=1;i<NCARS;i++){run=g[i]===g[i-1]?run+1:1;mx=Math.max(mx,run);}
+    if(mx<=3)break;}
+  const used={},names={},lastInn={};DRIVERS.forEach(d=>names[d.name]=1);const trapSeen={};
+  rules.forEach((k,i)=>{if(!g[i])lastInn[k]=i;});  // the last innocent car of a rule shows its tricky exception (divided road, tie, placard, 3 ft exactly)
+  return rules.map((k,i)=>{
+    const a=ask[i],bad=g[i],tier=bad?(a===1?1:2):(lastInn[k]===i?2:1);
+    const pool=V[k].filter(v=>!!v.bad===bad),u=used[k]=used[k]||[];
+    let pref=pool.filter(v=>v.t===tier&&u.indexOf(v)<0);
+    if(!pref.length)pref=pool.filter(v=>(v.t===tier||v.t===0)&&u.indexOf(v)<0);
+    if(!pref.length)pref=pool.filter(v=>u.indexOf(v)<0);  // an unused scene of any tier beats repeating one
+    if(!pref.length)pref=pool.filter(v=>v.t===tier||v.t===0);
+    if(!pref.length)pref=pool;
+    const v=pick(pref,r);u.push(v);
+    const drv=DRIVERS.find(d=>d.rule===k&&(i===first[k]||i===last[k]))||null;
+    let name,l1,l2,col,kind,desc;
+    if(drv){name=drv.name;col=drv.col;kind=drv.kind;desc=drv.desc;l1=drv.greet;l2=drv.sit[0];}
+    else{const pal=pick(PAL,r);col=pal[1];kind=pick(Object.keys(KIND),r);desc=pal[0]+' '+kind;const cand=LINES[k];let t=null;
+      for(let q=0;q<8;q++){t=pick(cand,r);if(!names[t[0]])break;}
+      names[t[0]]=1;name=t[0];l1=t[1];l2=t[2];}
+    let opts=null,corr=-1;if(WH(i)&&v.w){opts=shuffle(v.w,r);corr=opts.indexOf(v.w[0]);}
+    const trap=TRAPS.indexOf(k)>=0&&a>=2&&!trapSeen[k];if(trap)trapSeen[k]=1;
+    const lim=Math.max(3,lerp(6,3.8,i/(NCARS-1))*(a===1?1:a===2?.87:.8));
+    return {i,rule:k,bad:bad?1:0,v,drv,name,l1,l2,col,kind,desc,ask:a,tier,which:WH(i),opts,corr,trap,brief:a===1,lim};});}
+
+/* ---------- game state ---------- */
+const META={best:0,plays:0,daily:{}}; // daily[date] = the first finished run of that day (win or suspended): the daily is one try, like Wordle; every later shift is practice
+try{const m=JSON.parse(localStorage.getItem('po_meta2')||'{}');META.best=+m.best||0;META.plays=+m.plays||0;META.daily=m.daily||{};}catch(e){}
+function saveMeta(){try{localStorage.setItem('po_meta2',JSON.stringify(META));}catch(e){}}
+const mk=()=>({v:PT.start,disp:PT.start,shake:0,flash:0,pop:0});
+const MK=['chief','pub','nerve'],MN=['CHIEF','PUBLIC','NERVE'],MX=[14,139,264];
+function blankG(){return {mode:'title',t:0,clock:0,phase:'',idx:0,car:null,m:{chief:mk(),pub:mk(),nerve:mk()},fl:[],pt:[],shake:0,siren:0,red:0,hit:0,
+  ban:null,res:[],fails:{},stats:{cars:0,viol:0,good:0,fast:0,slow:0,wrong:0,trapOk:0,trapN:0},mem:{},opts:null,streak:0,ending:null,endT:0,ft:0,fel:0,flim:3,pt0:0,bt:0,taught:0,cf:null,
+  firstWrong:null,lastFail:null,worst:null,win:false,copied:0,sched:[],kind:'daily',dk:'',seed:0,reason:''};}
+let G=blankG();
+let C={x:0,y:0,vx:0,rot:0,ent:0,alpha:1,dir:0,x0:0,armed:false};
+const P={down:false,sx:0,sy:0,x:0,y:0,lx:0,lt:0,vx:0,owner:null,moved:false};
+const K={x:25,y:118,w:340,h:410},PIV=700;
+let pracN=0;
+function mkCar(i){const s=G.sched[i],st=s.drv?(G.mem[s.drv.id]||{}).state||null:null;let l1=s.l1,l2=s.l2;
+  if(s.drv){l1=st?pick(MEMLINES[st],Math.random):s.drv.greet;l2=s.drv.sit[st?1:0];}
+  return Object.assign({},s,{mem:st,l1,l2,grudge:st==='wrongTicket'&&!s.bad,cocky:(st==='wrongPass'||st==='timeout')&&!!s.bad,
+    bub:[wrapText(l1,262,17,700),wrapText(l2,262,17,700)],el:0,t:0,sf:0});}
+function beginCar(i){G.car=mkCar(i);G.idx=i;G.pt0=0;G.cf=null;G.opts=null;C={x:0,y:0,vx:0,rot:0,ent:0,alpha:1,dir:0,x0:0,armed:false};
+  if(G.car.brief){G.phase='brief';G.bt=0;G.taught++;}else G.phase='enter';}
+function endBrief(){G.phase='enter';G.pt0=0;}
+function startShift(){
+  META.plays++;saveMeta();
+  const dk=QS.get('date')||dateKey(),hasSeed=QS.get('seed')!==null;let seed,kind;
+  if(hasSeed){seed=(+QS.get('seed'))>>>0;kind='seed';}
+  else{seed=hashStr('pulled-over|'+dk);if(META.daily[dk]){kind='practice';seed=(seed+7919*(++pracN))>>>0;}else kind='daily';}
+  G=blankG();G.mode='play';G.kind=kind;G.dk=dk;G.seed=seed;G.sched=makeShift(seed);beginCar(0);}
+
+/* ---------- scoring: the same function drives the game and the balance sim ---------- */
+function judge(c,act,fr,pk){
+  const D={chief:0,pub:0,nerve:0},fast=fr<=FAST;let v='r',why=null,st='rightTicket',mult=false;
+  if(act==='timeout'){D.nerve=PT.timeN;if(c.bad)D.chief=PT.timeC;why='rule';st='timeout';}
+  else if(act==='let'){if(c.bad){D.chief=PT.miss;mult=c.cocky;why='rule';st='wrongPass';}else{v=fast?'g':'y';if(fast)D.pub=PT.fast;st='rightPass';}}
+  else if(act==='ticket'){if(!c.bad){D.pub=PT.falseT;mult=c.grudge;why='ok';st='wrongTicket';}else{v=fast?'g':'y';if(fast)D.chief=PT.fast;}}
+  else{if(pk===c.corr){v=fast?'g':'y';if(fast)D.chief=PT.fastWhich;}else{D.chief=PT.wrongRule;why='rule';}}
+  if(v==='r'&&act!=='timeout')D.nerve+=PT.wrongN;
+  const snap=v==='r'&&act!=='timeout'&&fr<=SNAP,f=(mult?1.5:1)*(snap?1.5:1); // a wrong call inside the first 25 percent of the timer is a snap guess: guessing costs more than thinking
+  if(f>1)for(const k of MK)if(D[k]<0)D[k]=Math.round(D[k]*f);
+  return {v,D,why,mult,snap,fast,st};}
+function applyJ(M,Sx,j){const out=[];
+  for(const k of MK)if(j.D[k]){M[k].v=clamp(M[k].v+j.D[k],0,100);out.push([k,j.D[k]]);}
+  if(j.v==='g'){Sx.streak++;if(Sx.streak%3===0){M.nerve.v=clamp(M.nerve.v+PT.steady,0,100);out.push(['nerve',PT.steady,'STEADY HANDS']);}}else Sx.streak=0;
+  return out;}
+
+/* ---------- effects ---------- */
+function addFloat(x,y,s,col,sz){G.fl.push({x,y,s,col,t:1,sz:sz||19});}
+function scraps(n,x,y,dir){for(let i=0;i<n;i++)G.pt.push({x,y,vx:dir*(80+Math.random()*340)+(Math.random()-.5)*140,vy:-140-Math.random()*280,r:Math.random()*6,vr:(Math.random()-.5)*14,l:1,w:6+Math.random()*8,h:4+Math.random()*5,col:['#ffffff','#ffd54a','#ff4d4d','#4da3ff'][i%4]});}
+function fx(dt){for(const k in G.m){const m=G.m[k];m.disp+=(m.v-m.disp)*Math.min(1,dt*7);m.shake=Math.max(0,m.shake-dt*2.2);m.flash=Math.max(0,m.flash-dt*2.5);m.pop=Math.max(0,m.pop-dt*3);}
+  G.shake=Math.max(0,G.shake-dt*30);G.siren=Math.max(0,G.siren-dt);G.red=Math.max(0,G.red-dt*2.2);if(G.ban)G.ban.t-=dt;
+  if(G.copied>0)G.copied=Math.max(0,G.copied-dt);else if(G.copied<0)G.copied=Math.min(0,G.copied+dt);
+  G.fl=G.fl.filter(f=>{f.t-=dt*1.1;f.y-=dt*34;return f.t>0;});
+  G.pt=G.pt.filter(p=>{p.vy+=700*dt;p.x+=p.vx*dt;p.y+=p.vy*dt;p.r+=p.vr*dt;p.l-=dt*1.1;return p.l>0;});}
+function fxMeter(k,d){const m=G.m[k];if(d<0){m.shake=1;m.flash=1;G.shake=Math.max(G.shake,Math.min(11,-d*.5));G.red=Math.max(G.red,.7);}else m.pop=1;
+  addFloat(MX[MK.indexOf(k)]+56,48,(d>0?'+':'')+d,d>0?'#6ee7a0':'#ff6b6b',20);}
+
+/* ---------- the calls ---------- */
+function resolve(act,pk,fr){
+  const c=G.car,s=G.stats;s.cars++;if(c.bad)s.viol++;
+  const j=judge(c,act,fr,pk),eff=applyJ(G.m,G,j);
+  for(const e of eff){fxMeter(e[0],e[1]);if(e[2])addFloat(W/2,296,e[2]+'  +'+e[1]+' NERVE','#6ee7a0',20);}
+  let big,col;
+  if(j.v==='g'){const e=eff[0];big='FAST  +'+e[1]+' '+MN[MK.indexOf(e[0])];col='#6ee7a0';}
+  else if(j.v==='y'){big='SLOW  +0';col='#ffb020';}
+  else if(act==='timeout'){big='TOO SLOW  '+j.D.nerve+' NERVE';col='#ff6b6b';}
+  else{const e=eff.find(q=>q[0]!=='nerve')||eff[0];big='WRONG  '+e[1]+' '+MN[MK.indexOf(e[0])];col='#ff6b6b';}
+  addFloat(W/2,340,big,col,26);
+  if(j.mult)addFloat(W/2,306,'THEY REMEMBER  x1.5','#ffb020',22);
+  if(j.snap)addFloat(W/2,274,'SNAP GUESS  x1.5','#ff9f43',20);
+  G.res.push(j.v);if(j.v==='r')s.wrong++;else{s.good++;if(j.v==='g')s.fast++;else s.slow++;}
+  if(c.trap){s.trapN++;if(j.v!=='r')s.trapOk++;}
+  if(c.drv)G.mem[c.drv.id]={state:j.st};
+  if(j.v==='r'){G.fails[c.rule]=(G.fails[c.rule]||0)+1;G.lastFail=c.rule;if(!G.firstWrong)G.firstWrong=c.rule;
+    const R=RULES[c.rule];G.ban={head:j.why==='ok'?'WHY IT WAS FINE':'THE RULE',txt:j.why==='ok'?(c.v.why||R.ok):R.say,cvc:R.cvc,t:2,lines:wrapText(j.why==='ok'?(c.v.why||R.ok):R.say,318,16,800)};
+    sfx.wrong();G.hit=.09;}
+  for(const k of MK)if(G.m[k].v<=0&&!G.ending)G.ending=k;}
+function startExit(dir){G.phase='exit';G.pt0=0;C.dir=dir;C.x0=C.x;C.vx=0;}
+function commit(act){
+  if(G.phase!=='decide'&&G.phase!=='enter')return;const c=G.car,fr=c.el/c.lim;
+  if(act==='ticket'){G.siren=.55;sfx.ticket();scraps(16,W/2+C.x,330,1);
+    if(c.which&&c.bad){c.sf=fr;G.phase='follow';G.fel=0;G.ft=0;G.flim=Math.max(2.8,c.lim*.75);G.opts=c.opts;G.ban=null;return;}
+    resolve('ticket',undefined,fr);startExit(1);}
+  else{resolve('let',undefined,fr);startExit(-1);}}
+function pickChoice(k){if(G.phase!=='follow'||G.ft<.5)return;const c=G.car;G.cf={k};resolve('which',k,Math.max(c.sf,G.fel/G.flim));startExit(1);}
+function followTimeout(){G.cf={k:-1};resolve('timeout',null,1);startExit(1);}
+function nextCar(){if(G.ending||G.idx+1>=NCARS){endShift();return;}beginCar(G.idx+1);}
+function endShift(){G.mode='end';G.endT=0;G.win=!G.ending;G.reason=G.ending||'done';
+  META.best=Math.max(META.best,G.stats.good);
+  if(G.kind==='daily')META.daily[G.dk]={win:G.win,time:G.clock,n:G.res.length};
+  saveMeta();
+  let wk=null,wn=0;for(const k in G.fails){const n=G.fails[k];if(n>wn||(n===wn&&k===G.firstWrong)){wn=n;wk=k;}}G.worst=wk?{k:wk,n:wn}:null;} // ties go to the first miss, so the roast and "missed most" agree unless another rule was missed more
+function dragPhys(dt,nd){
+  if(!nd&&P.down&&P.owner==='card'){C.x+=(clamp(P.x-P.sx,-230,230)-C.x)*Math.min(1,dt*28);C.vx=0;}
+  else{C.vx+=(-240*C.x-24*C.vx)*dt;C.x+=C.vx*dt;}
+  C.rot=C.x/820;C.y=-Math.min(14,Math.abs(C.x)*.07);
+  const arm=Math.abs(C.x)>90;if(arm&&!C.armed&&navigator.vibrate&&P.down){try{navigator.vibrate(8);}catch(e){}}C.armed=arm;}
+function update(dt){
+  G.t+=dt;fx(dt);
+  if(G.mode==='end'){G.endT+=dt;return;}
+  if(G.mode!=='play')return;
+  G.clock+=dt;
+  if(G.hit>0){G.hit-=dt;return;}
+  const c=G.car;if(G.phase!=='brief')c.t+=dt; // the card's scene starts at 0 when it appears, not during the briefing
+  if(G.phase==='brief'){G.bt+=dt;if(G.bt>=BRIEF_T)endBrief();}
+  else if(G.phase==='enter'){G.pt0+=dt;C.ent=Math.min(1,G.pt0/.4);dragPhys(dt);if(C.ent>=1)G.phase='decide';}
+  else if(G.phase==='decide'){c.el+=dt;dragPhys(dt);if(c.el>=c.lim){resolve('timeout',undefined,1);startExit(0);}}
+  else if(G.phase==='follow'){G.fel+=dt;G.ft=Math.min(1,G.ft+dt*5);dragPhys(dt,true);if(G.fel>=G.flim)followTimeout();}
+  else if(G.phase==='exit'){G.pt0+=dt;const p=Math.min(1,G.pt0/.3),e=eo(p);
+    if(C.dir){C.x=C.x0+C.dir*620*e;C.rot=C.x/820+C.dir*.5*e;C.y=-60*e;}else C.y=260*e;
+    C.alpha=1-e*.9;if(p>=1)nextCar();}}
+
+/* ---------- share card: Wordle-style text ---------- */
+const SQ={g:0x1F7E9,y:0x1F7E8,r:0x1F7E5,n:0x2B1B};
+const roastLine=()=>G.firstWrong?ROAST[G.firstWrong]:'No wrong calls. The Chief wants your autograph.';
+function shareText(){const e=G.res.map(x=>String.fromCodePoint(SQ[x]));while(e.length<NCARS)e.push(String.fromCodePoint(SQ.n));
+  const tag=G.kind==='daily'?'Daily '+G.dk:G.kind==='seed'?'Seed '+G.seed:'Practice';
+  return ['PULLED OVER  '+tag+'  '+(G.win?'WIN':'SUSPENDED'),e.slice(0,10).join(''),e.slice(10).join(''),
+    'Time '+fmt(G.clock)+'   Chief '+Math.round(G.m.chief.v)+'  Public '+Math.round(G.m.pub.v)+'  Nerve '+Math.round(G.m.nerve.v),
+    'Right '+G.stats.good+'/'+NCARS+'   Adult traps '+G.stats.trapOk+'/'+G.stats.trapN,roastLine(),LINK].join('\n');}
+function doCopy(){const s=shareText(),ok=()=>{G.copied=1.8;},fb=()=>{try{const t=document.createElement('textarea');t.value=s;t.style.cssText='position:fixed;left:-999px;top:0';document.body.appendChild(t);t.select();document.execCommand('copy');document.body.removeChild(t);ok();}catch(e){G.copied=-1.8;}};
+  try{if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(s).then(ok,fb);else fb();}catch(e){fb();}}
+
+/* ---------- input: touch swipe, mouse drag, keys ---------- */
+const btn=k=>({x:25,y:578+k*78+(1-eo(G.ft))*260,w:340,h:66});
+const BCOPY={x:45,y:650,w:300,h:60},BAGAIN={x:45,y:722,w:300,h:60};
+const inb=(p,b)=>p.x>=b.x&&p.x<=b.x+b.w&&p.y>=b.y&&p.y<=b.y+b.h;
+function ptr(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H};}
+function tapDown(p){
+  if(G.mode==='title'){startShift();return;}
+  if(G.mode==='end')return; // the end-card buttons act on release (pUp): a clipboard write needs a user activation, and a touch pointerdown is not one on iOS
+  if(G.phase==='brief'){if(G.bt>.9)endBrief();return;}
+  if(G.phase==='enter'||G.phase==='decide'||G.phase==='exit')P.owner='card'; // a swipe begun while the last card leaves carries onto the next card
+  else if(G.phase==='follow')for(let k=0;k<3;k++)if(inb(p,btn(k))){pickChoice(k);break;}}
+function release(){if(G.phase!=='decide'&&G.phase!=='enter')return;const dx=P.x-P.sx;if(Math.abs(dx)>90||(Math.abs(P.vx)>.9&&Math.abs(dx)>35))commit(dx>0?'ticket':'let');}
+cv.addEventListener('pointerdown',e=>{e.preventDefault();unlock();try{cv.setPointerCapture(e.pointerId);}catch(_){}
+  const p=ptr(e);P.down=true;P.sx=P.x=P.lx=p.x;P.sy=P.y=p.y;P.lt=e.timeStamp;P.vx=0;P.owner=null;P.moved=false;tapDown(p);});
+cv.addEventListener('pointermove',e=>{if(!P.down)return;const p=ptr(e),dt=Math.max(1,e.timeStamp-P.lt);P.vx=P.vx*.6+((p.x-P.lx)/dt)*.4;P.lx=p.x;P.lt=e.timeStamp;P.x=p.x;P.y=p.y;if(Math.abs(P.x-P.sx)>6)P.moved=true;});
+const pUp=e=>{if(!P.down)return;P.down=false;
+  if(G.mode==='end'){if(G.endT>.6){const p=ptr(e);if(inb(p,BCOPY))doCopy();else if(inb(p,BAGAIN))startShift();}P.owner=null;return;}
+  if(e.timeStamp-P.lt>80)P.vx=0; /* a paused finger is not a flick */ if(P.owner==='card')release();P.owner=null;};
+cv.addEventListener('pointerup',pUp);cv.addEventListener('pointercancel',()=>{P.down=false;P.owner=null;});
+addEventListener('keydown',e=>{unlock();
+  if(G.mode==='title'){if(e.key===' '||e.key==='Enter')startShift();return;}
+  if(G.mode==='end'){if(G.endT>.6){if(e.key==='c')doCopy();else if(e.key===' '||e.key==='Enter')startShift();}return;}
+  if(G.phase==='brief'){if(G.bt>.9&&(e.key===' '||e.key==='Enter'))endBrief();return;}
+  if(e.key==='ArrowRight')commit('ticket');else if(e.key==='ArrowLeft')commit('let');else if('123'.indexOf(e.key)>=0&&e.key)pickChoice(+e.key-1);});
+
+/* ---------- render ---------- */
+const RAIN=Array.from({length:46},(_,i)=>({x:(i*97)%W,y:(i*211)%H,s:380+(i*53)%260}));
+let BGC=null; // the sky and the skyline never change: draw them once on an offscreen canvas, blit each frame
+function bgBuild(){BGC=document.createElement('canvas');BGC.width=W*2;BGC.height=H*2;const c=BGC.getContext('2d');c.scale(2,2);
+  const g=c.createLinearGradient(0,0,0,H);g.addColorStop(0,'#0b1124');g.addColorStop(.55,'#0f1830');g.addColorStop(1,'#070a14');c.fillStyle=g;c.fillRect(0,0,W,H);
+  for(let i=0;i<14;i++){const x=i*30-6,h=60+((i*47)%90),y=770-h;c.fillStyle='#0a0f1d';c.fillRect(x,y,26,h+80);
+    for(let r=0;r<h/16;r++)for(let q=0;q<2;q++)if(((i*7+r*3+q*5)%4)<2){c.fillStyle=((i+r+q)%5===0)?'#ffd98a':'#26324f';c.fillRect(x+4+q*11,y+6+r*16,6,8);}}}
+function drawBg(){if(!BGC)bgBuild();cx.drawImage(BGC,0,0,W,H);
+  cx.strokeStyle='rgba(150,180,255,.12)';cx.lineWidth=1.2;cx.beginPath();for(const d of RAIN){const y=(d.y+G.t*d.s)%H;cx.moveTo(d.x,y);cx.lineTo(d.x-3,y+12);}cx.stroke();}
+function lightbar(x,y,k){const ph=Math.floor(G.t*(k>.5?14:2.2))%2;
+  for(let s=0;s<2;s++){const on=(s===ph)?1:.18,col=s?'60,120,255':'255,50,50';glow(x+(s?31:-31),y,k>.5?95:48,col,.55*on*k);
+    cx.fillStyle='rgba('+col+','+(.3+.7*on*k)+')';rr(x+(s?2:-62),y-8,60,16,5);cx.fill();}}
+function drawDash(){cx.fillStyle='#0b0f1b';cx.beginPath();cx.moveTo(0,H);cx.lineTo(0,796);cx.quadraticCurveTo(W/2,744,W,796);cx.lineTo(W,H);cx.closePath();cx.fill();
+  cx.strokeStyle='#1d2740';cx.lineWidth=3;cx.stroke();lightbar(W/2,800,G.siren>0?1:.35);}
+function drawMeters(){MK.forEach((k,i)=>{const m=G.m[k],x=MX[i]+Math.sin(G.t*75)*8*m.shake,y=10,w=112,pop=1+.35*m.pop+(m.shake>0?.12:0);
+  cx.save();cx.translate(x+9,y+9);cx.scale(pop,pop);const ic=m.flash>0?'#ff5a5a':'#e9eefc';
+  if(i===0)star(0,0,9,ic);else if(i===1)heart(0,1,6,ic);else bolt(0,0,8,ic);cx.restore();
+  txt(MN[i],x+24,y+9,12,m.flash>0?'#ff8a8a':'#9fb0d8','left',900);txt(String(Math.round(m.disp)),x+w,y+9,12,'#cfd8f5','right',800);
+  rr(x,y+22,w,14,7);cx.fillStyle='#1a2034';cx.fill();
+  const f=clamp(m.disp/100,0,1),col=m.disp>55?'#46d39a':m.disp>28?'#f5b942':'#ff5a5a';
+  if(f>.01){rr(x,y+22,Math.max(14,w*f),14,7);cx.fillStyle=m.flash>0?'#fff':col;cx.fill();}
+  cx.strokeStyle='rgba(255,255,255,.18)';cx.lineWidth=1.5;rr(x,y+22,w,14,7);cx.stroke();
+  if(m.v<30){cx.strokeStyle='rgba(255,90,90,'+(.4+.4*Math.sin(G.t*9))+')';cx.lineWidth=2;rr(x-2,y+20,w+4,18,9);cx.stroke();}});}
+function drawClock(){const tag=G.kind==='daily'?'DAILY '+G.dk.slice(5):G.kind==='seed'?'SEED '+G.seed:'PRACTICE';
+  txt(tag,25,60,11,'#ffb020','left',900);txt(fmt(G.clock),W/2,60,22,'#ffffff','center',800,MONO);
+  txt('CAR '+Math.min(G.idx+1,NCARS)+'/'+NCARS,365,60,11,'#6f7da8','right',900);
+  const pr=G.streak>=2?'STREAK '+G.streak:'';if(pr)txt(pr,365,74,10,'#6ee7a0','right',900);}
+function drawPips(){for(let i=0;i<NCARS;i++){const x=25+i*17+3,y=80,r=G.res[i];
+  if(r){rr(x,y,11,11,3);cx.fillStyle=r==='g'?'#46d39a':r==='y'?'#f5b942':'#ff5a5a';cx.fill();}
+  else if(i===G.idx&&G.phase!=='exit'){cx.strokeStyle='rgba(255,255,255,'+(.6+.4*Math.sin(G.t*8))+')';cx.lineWidth=2;rr(x,y,11,11,3);cx.stroke();}
+  else{rr(x,y,11,11,3);cx.fillStyle='#27304a';cx.fill();}}}
+function drawTimer(){let f=null;if(G.phase==='brief')f=1-G.bt/BRIEF_T;else if(G.phase==='enter')f=1;else if(G.phase==='decide')f=1-G.car.el/G.car.lim;else if(G.phase==='follow')f=1-G.fel/G.flim;if(f===null)return;
+  f=clamp(f,0,1);const w=340*f,col=G.phase==='brief'?'#3aa9c9':f>.45?'#46d39a':f>.25?'#f5b942':'#ff5a5a',blink=G.phase!=='brief'&&f<.25&&Math.floor(G.t*10)%2;
+  rr(25,98,340,7,3.5);cx.fillStyle='#161c2e';cx.fill();if(w>2){rr(25+(340-w)/2,98,w,7,3.5);cx.fillStyle=blink?'#fff':col;cx.fill();}
+  if(G.phase==='decide'||G.phase==='follow'){const a=(G.phase==='follow'?G.fel/G.flim:G.car.el/G.car.lim)<=FAST;if(a)txt('FAST WINDOW',365,112,9,'#6ee7a0','right',900);}}
+function drawLabels(){if(G.phase==='follow'||G.phase==='brief'||(G.ban&&G.ban.t>0))return;const la=clamp(-C.x/90,0,1),ra=clamp(C.x/90,0,1);
+  cx.save();cx.globalAlpha=G.phase==='exit'?.5:1;
+  rr(25,548,150,46,23);cx.fillStyle=la>0?'rgba(47,191,113,'+(.35+.65*la)+')':'rgba(47,191,113,.22)';cx.fill();
+  cx.strokeStyle='#2fbf71';cx.lineWidth=2;cx.stroke();txt('LET GO',108,571,18,'#e8fff3','center',900);
+  cx.strokeStyle='#e8fff3';cx.lineWidth=3;cx.beginPath();cx.moveTo(52,563);cx.lineTo(44,571);cx.lineTo(52,579);cx.stroke();
+  const rp=Math.floor(G.t*9)%2;rr(215,548,150,46,23);cx.fillStyle=ra>0?(rp?'rgba(255,70,70,':'rgba(70,130,255,')+(.35+.65*ra)+')':'rgba(224,68,62,.22)';cx.fill();
+  cx.strokeStyle='#e0443e';cx.lineWidth=2;cx.stroke();txt('TICKET',282,571,18,'#fff0f0','center',900);
+  cx.strokeStyle='#fff0f0';cx.lineWidth=3;cx.beginPath();cx.moveTo(338,563);cx.lineTo(346,571);cx.lineTo(338,579);cx.stroke();cx.restore();}
+function ruleIcon(k,x,y){cx.save();cx.translate(x,y);
+  if(k==='curb'){cx.fillStyle='#e2332f';cx.fillRect(-14,-11,28,7);cx.fillStyle='#e8ecf4';cx.fillRect(-14,-3,28,7);cx.fillStyle='#2f6fe0';cx.fillRect(-14,5,28,7);}
+  else if(k==='bike'){cx.strokeStyle='#cfd5e3';cx.lineWidth=2;cx.beginPath();cx.arc(-8,5,5.5,0,6.3);cx.moveTo(13.5,5);cx.arc(8,5,5.5,0,6.3);cx.stroke();cx.strokeStyle='#4aa3ff';cx.beginPath();cx.moveTo(-8,5);cx.lineTo(-1,-5);cx.lineTo(8,5);cx.moveTo(-1,-5);cx.lineTo(5,-5);cx.stroke();circ(-1,-10,3,'#ffd54a');}
+  else if(k==='fourway'){cx.fillStyle='#8b919d';cx.fillRect(-4,-14,8,28);cx.fillRect(-14,-4,28,8);oct(0,0,6,'#d62b2b');}
+  else if(k==='bus'){cx.fillStyle='#f5b900';rr(-16,-8,32,16,4);cx.fill();circ(-11,-4,2.4,'#ff2d2d');circ(11,-4,2.4,'#ff2d2d');oct(0,-14,5,'#e02424');}
+  else if(k==='phone'){cx.fillStyle='#0b0e14';rr(-7,-13,14,26,3);cx.fill();cx.fillStyle='#bfe3ff';rr(-5,-10,10,19,2);cx.fill();}
+  else if(k==='cross'){cx.fillStyle='#232630';cx.fillRect(-15,-13,30,26);cx.fillStyle='#eee';for(let i=0;i<4;i++)cx.fillRect(-12,-11+i*7,24,4);}
+  else if(k==='lights'){cx.fillStyle='rgba(255,240,170,.55)';cx.beginPath();cx.moveTo(-4,0);cx.lineTo(15,-12);cx.lineTo(15,12);cx.closePath();cx.fill();circ(-8,0,5,'#fff6c8');}
+  else{circ(-8,0,6,'#ff3a3a');circ(8,0,6,'#3a7bff');cx.strokeStyle='#cfd8ff';cx.lineWidth=2;cx.beginPath();cx.arc(0,0,13,-.9,.9);cx.stroke();}
+  cx.restore();}
+function drawChoices(){const out=G.phase==='exit',fade=out?1-clamp(G.pt0/.3,0,1):1;if(!G.opts||fade<=0)return;
+  cx.save();cx.globalAlpha=fade;txt('WHICH RULE DID THEY BREAK?',W/2,556,17,'#ffd54a','center',900);
+  const fz=Math.min(...G.opts.map(s=>fitSize(s,250,20,12))); // one size for all three, so the text size cannot tell the right option
+  G.opts.forEach((s,i)=>{const b=btn(i),cf=G.cf,mine=cf&&cf.k===i,right=i===G.car.corr;
+    rr(b.x,b.y,b.w,b.h,16);cx.fillStyle=cf?(mine?(right?'#1f7a4d':'#8a2a2a'):(right?'#1f5f40':'#172036')):'#1b2644';cx.fill();
+    cx.strokeStyle=cf&&right?'#46d39a':mine?'#ff6b6b':'#5b7cff';cx.lineWidth=2.5;cx.stroke();
+    circ(b.x+30,b.y+b.h/2,15,cf&&right?'#46d39a':'#2c3a6b');txt(String(i+1),b.x+30,b.y+b.h/2+1,18,'#fff','center',900);
+    txt(s,b.x+56,b.y+b.h/2+1,fz,'#fff','left',800);});
+  cx.restore();}
+function drawBanner(){const b=G.ban;if(!b||b.t<=0)return;const a=clamp(b.t/.25,0,1)*clamp((2-b.t)/.12,0,1);
+  const h=b.lines.length*21+52;
+  cx.save();cx.globalAlpha=a;cx.translate(0,(1-clamp((2-b.t)/.15,0,1))*18);
+  rr(20,538,350,h,16);cx.fillStyle='rgba(10,14,28,.97)';cx.fill();cx.strokeStyle='#ffb020';cx.lineWidth=2.5;cx.stroke();
+  txt(b.head,34,538+16,11,'#ffb020','left',900);
+  b.lines.forEach((l,i)=>txt(l,34,538+38+i*21,16,'#fff','left',800));
+  txt(b.cvc,356,538+16,11,'#8b97bd','right',800);
+  cx.restore();}
+function drawCard(){const c=G.car;if(!c)return;let tx=C.x,ty=C.y,rot=C.rot,al=C.alpha;
+  if(G.phase==='enter'){const p=C.ent;tx+=(1-eob(p))*330;ty+=(1-eo(p))*40;rot+=(1-eo(p))*.16;al=Math.min(1,p*3.5);}
+  const left=G.phase==='decide'?1-c.el/c.lim:1,trem=(G.m.nerve.v<30?1.4:0)+(left<.3?1.8:0);if(trem)tx+=Math.sin(G.t*55)*trem;
+  cx.save();cx.globalAlpha=al;cx.translate(W/2+tx,PIV+ty);cx.rotate(rot);cx.translate(-W/2,-PIV);
+  const rs=clamp((C.x-20)/70,0,1),ls=clamp((-C.x-20)/70,0,1),stamp=G.phase==='follow';
+  let edge='#2b3555';if(rs>0||stamp)edge=Math.floor(G.t*9)%2?'rgba(255,70,70,'+(.5+rs*.5)+')':'rgba(70,130,255,'+(.5+rs*.5)+')';else if(ls>0)edge='rgba(60,210,130,'+(.5+ls*.5)+')';
+  cx.fillStyle='rgba(0,0,0,.38)';rr(K.x+2,K.y+10,K.w,K.h,22);cx.fill();cx.fillStyle='#161a26';rr(K.x,K.y,K.w,K.h,22);cx.fill(); // no shadowBlur: it is slow on phones
+  cx.lineWidth=3;cx.strokeStyle=edge;rr(K.x,K.y,K.w,K.h,22);cx.stroke();
+  cx.save();rr(K.x+5,K.y+5,SW,SH,18);cx.clip();cx.translate(K.x+5,K.y+5);SC[c.rule](c.t,c);cx.restore();
+  if(c.trap)pill(K.x+55,K.y+12,230,22,'#ffb020','MOST ADULTS MISS THIS ONE','#1a1204',12);
+  txt('CAR '+(c.i+1)+' OF '+NCARS+(c.ask>1?'   RETEST':''),K.x+16,K.y+SH+22,11,'#6f7da8','left',900);
+  txt(c.name,K.x+16,K.y+SH+42,19,'#ffffff','left',900);txt(c.desc,K.x+16,K.y+SH+60,12,'#8b97bd','left',700);
+  if(c.mem){const wr=c.grudge;rr(K.x+K.w-100,K.y+SH+17,84,26,13);cx.fillStyle=wr?'#5a1c24':'#26304f';cx.fill();cx.strokeStyle=wr?'#ff6b6b':'#6f86d6';cx.lineWidth=1.5;cx.stroke();
+    txt('AGAIN',K.x+K.w-52,K.y+SH+31,12,'#fff','center',900);const ix=K.x+K.w-90,iy=K.y+SH+30;
+    if(c.mem==='rightTicket'||c.mem==='wrongTicket'){cx.fillStyle='#ffd54a';rr(ix-5,iy-4,10,8,1.5);cx.fill();}
+    else if(c.mem==='timeout'){cx.strokeStyle='#ffd54a';cx.lineWidth=1.6;cx.beginPath();cx.arc(ix,iy,5,0,6.3);cx.moveTo(ix,iy);cx.lineTo(ix,iy-3);cx.moveTo(ix,iy);cx.lineTo(ix+2.5,iy);cx.stroke();}
+    else{cx.strokeStyle='#6ee7a0';cx.lineWidth=2;cx.beginPath();cx.moveTo(ix-4,iy);cx.lineTo(ix-1,iy+3);cx.lineTo(ix+4,iy-3);cx.stroke();}}
+  let by=K.y+SH+72;
+  c.bub.forEach((ls,bi)=>{const h=ls.length*21+14;rr(K.x+40,by,K.w-56,h,14);cx.fillStyle=bi?'#e8ecf8':'#ffffff';cx.fill();circ(K.x+22,by+17,9,c.col);
+    ls.forEach((l,i)=>txt(l,K.x+52,by+7+10.5+i*21,17,'#141a2c','left',700));by+=h+9;});
+  if(rs>0||ls>0||stamp){const right=rs>0||stamp,a=stamp?1:(right?rs:ls);cx.save();cx.globalAlpha=a;cx.translate(K.x+K.w/2,K.y+100);cx.rotate(right?-.2:.2);
+    cx.lineWidth=5;cx.strokeStyle=right?'#ff4d4d':'#3ddc8f';rr(-96,-34,192,68,12);cx.stroke();txt(right?'TICKET':'LET GO',0,2,46,right?'#ff4d4d':'#3ddc8f','center',900);cx.restore();}
+  cx.restore();}
+function drawBrief(){const c=G.car,R=RULES[c.rule],p=eo(seg(G.bt,0,.35)),demo={v:V[c.rule][SHOW1[c.rule]],col:'#e0463f',kind:'sedan'};
+  cx.save();cx.globalAlpha=p;cx.translate(0,(1-p)*-70);
+  cx.fillStyle='rgba(0,0,0,.38)';rr(K.x+2,K.y+10,K.w,K.h,22);cx.fill();cx.fillStyle='#0f1f2b';rr(K.x,K.y,K.w,K.h,22);cx.fill();
+  cx.lineWidth=3;cx.strokeStyle='#3aa9c9';rr(K.x,K.y,K.w,K.h,22);cx.stroke();
+  const hx=K.x+46,hy=K.y+50;circ(hx,hy,24,'#e0b08a');cx.fillStyle='#1b2f5b';rr(hx-26,hy-34,52,22,7);cx.fill();cx.fillRect(hx-30,hy-16,60,6);star(hx,hy-24,6,'#ffd54a');
+  circ(hx-8,hy-2,2.4,'#2a2020');circ(hx+8,hy-2,2.4,'#2a2020');cx.fillStyle='#4a3524';rr(hx-11,hy+8,22,6,3);cx.fill();
+  txt('SGT. REYES',K.x+84,K.y+38,18,'#fff','left',900);txt('BRIEFING  '+G.taught+' OF 8 RULES',K.x+84,K.y+60,12,'#7fd0e8','left',900);
+  cx.save();cx.translate(K.x+35,K.y+80);cx.scale(.82,.82);rr(0,0,SW,SH,18);cx.clip();SC[c.rule](G.bt,demo);cx.restore();
+  pill(K.x+K.w/2-62,K.y+80+4,124,20,'#d62b2b','THIS IS A TICKET','#fff',11);
+  wrapText(R.brief,300,19,800).forEach((l,i)=>txt(l,K.x+20,K.y+264+i*25,19,'#ffffff','left',800));
+  const f=1-G.bt/BRIEF_T;rr(K.x+20,K.y+K.h-34,300,8,4);cx.fillStyle='#16303f';cx.fill();rr(K.x+20,K.y+K.h-34,Math.max(8,300*f),8,4);cx.fillStyle='#3aa9c9';cx.fill();
+  txt(G.bt>.9?'TAP TO SKIP':'',K.x+K.w/2,K.y+K.h-14,11,'#7fd0e8','center',900);
+  cx.restore();}
+function drawHint(){if(G.idx!==0||G.phase!=='decide'||P.moved||META.plays>1)return;const x=W/2+Math.sin(G.t*2.6)*80;
+  cx.save();cx.globalAlpha=.85;circ(x,470,19,'rgba(255,255,255,.55)');circ(x,470,9,'#fff');cx.restore();}
+function drawFloats(){cx.lineJoin='round';for(const f of G.fl){cx.globalAlpha=clamp(f.t,0,1);cx.font='900 '+f.sz+'px '+FONT;cx.textAlign='center';cx.textBaseline='middle';cx.lineWidth=5;cx.strokeStyle='rgba(8,10,20,.85)';cx.strokeText(f.s,f.x,f.y);cx.fillStyle=f.col;cx.fillText(f.s,f.x,f.y);}cx.globalAlpha=1;
+  for(const p of G.pt){cx.save();cx.globalAlpha=clamp(p.l,0,1);cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.col;cx.fillRect(-p.w/2,-p.h/2,p.w,p.h);cx.restore();}}
+function drawPlay(){drawMeters();drawClock();drawPips();drawTimer();drawDash();drawLabels();
+  if(G.phase==='brief')drawBrief();else drawCard();
+  if(G.phase==='follow'||(G.phase==='exit'&&G.cf))drawChoices();drawBanner();drawHint();drawFloats();}
+function drawTitle(){const t=G.t,dk=QS.get('date')||dateKey(),d=META.daily[dk];lightbar(W/2,250,1);
+  txt('PULLED',W/2,336,68,'#ffffff','center',900);txt('OVER',W/2,402,68,'#ff4d4d','center',900);
+  txt('NIGHT SHIFT',W/2,454,20,'#8da2ff','center',800);
+  txt(d?'TODAY: '+(d.win?'WIN '+fmt(d.time):'SUSPENDED AT CAR '+d.n):"TODAY'S SHIFT  "+dk,W/2,500,14,'#ffb020','center',900);
+  cx.globalAlpha=.65+.35*Math.sin(t*4);rr(95,560,200,66,33);cx.fillStyle='#fff';cx.fill();cx.globalAlpha=1;txt('TAP',W/2,594,30,'#0a0f1e','center',900);
+  txt(d?'NEXT SHIFT IS PRACTICE: NEW CARS':'ONE TRY A DAY. SAME 20 CARS FOR EVERYONE',W/2,664,12,'#6f7da8','center',800);
+  if(META.best)txt('BEST  '+META.best+' / '+NCARS+' RIGHT',W/2,690,13,'#6f7da8','center',800);}
+function drawEnd(){const s=G.stats,a=eo(clamp(G.endT/.4,0,1)),win=G.win;cx.save();cx.globalAlpha=a;cx.translate(0,(1-a)*40);
+  rr(20,34,350,776,24);cx.fillStyle='#141828';cx.fill();cx.lineWidth=3;cx.strokeStyle=win?'#46d39a':(Math.floor(G.t*3)%2?'#ff4d4d':'#4d86ff');cx.stroke();
+  txt(win?'WIN':'SUSPENDED',W/2,86,win?64:46,win?'#46d39a':'#ff5a5a','center',900);
+  const n=G.res.length,sub=win?'You made it to sunrise.':G.reason==='chief'?'The Chief took your badge at car '+n+'.':G.reason==='pub'?'The public wanted you gone at car '+n+'.':'You froze at car '+n+'.';
+  txt(sub,W/2,128,14,'#c9d3f0','center',700);
+  txt('PULLED OVER  '+(G.kind==='daily'?'DAILY '+G.dk:G.kind==='seed'?'SEED '+G.seed:'PRACTICE SHIFT'),W/2,150,11,'#6f7da8','center',900);
+  for(let i=0;i<NCARS;i++){const x=32+(i%10)*33,y=168+Math.floor(i/10)*33,r=G.res[i];rr(x,y,28,28,6);cx.fillStyle=r==='g'?'#46d39a':r==='y'?'#f5b942':r==='r'?'#ff5a5a':'#232b44';cx.fill();}
+  txt('SHIFT TIME',W/2,250,11,'#6f7da8','center',900);txt(fmt(G.clock),W/2,282,46,'#fff','center',800,MONO);
+  MK.forEach((k,i)=>{const x=48+i*108;txt(MN[i]+'  '+Math.round(G.m[k].v),x,328,11,'#8b97bd','left',900);rr(x,340,96,10,5);cx.fillStyle='#1a2034';cx.fill();const v=G.m[k].v;if(v>2){rr(x,340,Math.max(10,96*v/100),10,5);cx.fillStyle=v>55?'#46d39a':v>28?'#f5b942':'#ff5a5a';cx.fill();}});
+  txt('RIGHT CALLS  '+s.good+' / '+NCARS,48,376,12,'#cfd8f5','left',900);txt(s.trapN?'ADULT TRAPS  '+s.trapOk+' / '+s.trapN:'ADULT TRAPS  - / -',342,376,12,'#ffb020','right',900);
+  txt(G.firstWrong?'YOUR FIRST MISS':'A CLEAN SHIFT',48,396,10,'#6f7da8','left',900);
+  rr(36,406,318,72,14);cx.fillStyle='#1e2540';cx.fill();wrapText(roastLine(),290,18,800).forEach((l,i,ar)=>txt(l,W/2,442-(ar.length-1)*11+i*23,18,'#ffd98a','center',800));
+  txt('RULE YOU MISSED MOST',48,500,12,'#8b97bd','left',900);
+  if(G.worst){const R=RULES[G.worst.k];ruleIcon(G.worst.k,68,540);txt(R.label+'  x'+G.worst.n,96,526,20,'#fff','left',900);
+    wrapText(R.say,300,15,700).slice(0,3).forEach((l,i)=>txt(l,48,562+i*20,15,'#e8ecf8','left',700));
+    txt(R.cvc,48,626,11,'#ffb020','left',800);}
+  else txt('None. Clean shift.',48,530,22,'#46d39a','left',900);
+  const on=G.endT>.6,pul=on?.82+.18*Math.sin(G.t*5):.3;
+  cx.globalAlpha=a*pul;rr(BCOPY.x,BCOPY.y,BCOPY.w,BCOPY.h,30);cx.fillStyle=G.copied>0?'#46d39a':G.copied<0?'#ff6b6b':'#fff';cx.fill();cx.globalAlpha=a;
+  txt(G.copied>0?'COPIED':G.copied<0?'COPY FAILED':'COPY RESULT',W/2,BCOPY.y+31,20,'#0a0f1e','center',900);
+  cx.globalAlpha=a*(on?1:.3);rr(BAGAIN.x,BAGAIN.y,BAGAIN.w,BAGAIN.h,30);cx.strokeStyle='#8da2ff';cx.lineWidth=3;cx.stroke();
+  txt('RUN IT AGAIN',W/2,BAGAIN.y+31,19,'#cfd8ff','center',900);cx.restore();}
+function render(){cx.setTransform(cv.width/W,0,0,cv.height/H,0,0);drawBg();
+  cx.save();if(G.shake>0)cx.translate((Math.random()-.5)*G.shake,(Math.random()-.5)*G.shake);
+  if(G.mode==='title')drawTitle();else if(G.mode==='end')drawEnd();else drawPlay();cx.restore();
+  if(G.siren>0){const ph=Math.floor(G.t*16)%2,a=Math.min(1,G.siren/.5)*.42,gx=ph?W:0,g=cx.createRadialGradient(gx,300,10,gx,300,540);
+    g.addColorStop(0,ph?'rgba(70,130,255,'+a+')':'rgba(255,40,40,'+a+')');g.addColorStop(1,'rgba(0,0,0,0)');cx.fillStyle=g;cx.fillRect(0,0,W,H);}
+  const low=G.mode==='play'&&G.m.nerve.v<30?.28*(.6+.4*Math.sin(G.t*8)):0,v=Math.max(G.red*.4,low);
+  if(v>0){const g=cx.createRadialGradient(W/2,H/2,H*.28,W/2,H/2,H*.7);g.addColorStop(0,'rgba(255,30,30,0)');g.addColorStop(1,'rgba(255,30,30,'+v+')');cx.fillStyle=g;cx.fillRect(0,0,W,H);}}
+let last=performance.now();const PF=[],PI=[]; // PF: ms of JS per frame (update + draw), PI: ms between frames; read by __po.perf()
+function frame(now){const t0=performance.now(),rd=Math.min(.25,Math.max(0,(now-last)/1000)),n=Math.max(1,Math.ceil(rd/.05)); // a slow phone (down to 4 fps) still plays in real time: long frames are split into steps of at most 50 ms
+  if(now>last)PI.push(now-last);last=now;for(let i=0;i<TS*n;i++)update(rd/n);render();PF.push(performance.now()-t0);if(PF.length>1200){PF.shift();PI.shift();}requestAnimationFrame(frame);}
+requestAnimationFrame(frame);
+
+/* ---------- test hooks and the balance sim (no UI side effects) ---------- */
+function simRun(seed,pR,pF,rnd,policy,kn){
+  const sch=makeShift(seed),M={chief:mk(),pub:mk(),nerve:mk()},Sx={streak:0},mem={};let right=0,n=0;
+  const known=policy==='known'?new Set(shuffle(RK,rnd).slice(0,kn||0)):null; // a player who knows exactly kn of the 8 rules perfectly and coin-flips the rest
+  for(const s of sch){n++;const st=s.drv?mem[s.drv.id]:null;
+    const c=Object.assign({},s,{grudge:st==='wrongTicket'&&!s.bad,cocky:(st==='wrongPass'||st==='timeout')&&!!s.bad});
+    const fr=rnd()<pF?.3:.8;let ok=rnd()<pR,j;
+    if(policy==='ticket')ok=!!s.bad;else if(policy==='let')ok=!s.bad;else if(policy==='idle'){j=judge(c,'timeout',1);}
+    else if(policy==='sense'){ // an adult with common sense and no DMV study: reads the five obvious rules right 85 percent of the time (WHICH tap 70 percent), coin-flips curb, bike and four-way
+      const obvious=['phone','bus','siren','cross','lights'].indexOf(s.rule)>=0,coin=()=>{const act=rnd()<.5?'ticket':'let';return (act==='ticket'&&s.which&&s.bad)?judge(c,'which',fr,(rnd()*3)|0):judge(c,act,fr);};
+      j=(obvious&&rnd()<.85)?((s.which&&s.bad)?judge(c,'which',fr,rnd()<.7?s.corr:(s.corr+1+((rnd()*2)|0))%3):judge(c,s.bad?'ticket':'let',fr)):coin();}
+    else if(policy==='known'){
+      if(known.has(s.rule))j=(s.which&&s.bad)?judge(c,'which',fr,s.corr):judge(c,s.bad?'ticket':'let',fr);
+      else{const act=rnd()<.5?'ticket':'let';j=(act==='ticket'&&s.which&&s.bad)?judge(c,'which',fr,(rnd()*3)|0):judge(c,act,fr);}}
+    else if(policy==='struct'||policy==='struct2'||policy==='guess'){ // players with no rule knowledge who know the pattern: ticket every WHICH car, coin flips elsewhere
+      const f2=policy==='guess'?.12:fr,pick3=policy==='struct2'?(rnd()<.5?s.corr:(s.corr+1)%3):((rnd()*3)|0);
+      j=s.which?(s.bad?judge(c,'which',f2,pick3):judge(c,'ticket',f2)):judge(c,rnd()<.5?'ticket':'let',f2);}
+    if(!j){
+      if(s.which&&s.bad){
+        if(ok)j=judge(c,'which',Math.max(fr,rnd()<pF?.3:.8),s.corr);
+        else if(rnd()<.5||policy==='let')j=judge(c,'let',fr);
+        else j=judge(c,'which',Math.max(fr,.8),(s.corr+1)%3);
+      }else j=judge(c,ok===!!s.bad?'ticket':'let',fr);}
+    if(j.v!=='r')right++;applyJ(M,Sx,j);if(s.drv)mem[s.drv.id]=j.st;
+    if(MK.some(k=>M[k].v<=0))return {win:false,right,n};}
+  return {win:true,right,n};}
+window.__po={
+  peek(){const c=G.car;return {mode:G.mode,phase:G.phase,idx:G.idx,bad:c?c.bad:null,rule:c?c.rule:null,which:c?c.which:null,ask:c?c.ask:null,trap:c?c.trap:null,brief:c?c.brief:null,
+    opts:G.opts,corr:c?c.corr:-1,m:{chief:G.m.chief.v,pub:G.m.pub.v,nerve:G.m.nerve.v},stats:G.stats,ban:G.ban&&G.ban.t>0?G.ban.txt:null,reason:G.reason||null,win:G.win,worst:G.worst,
+    name:c?c.name:null,mem:c?c.mem:null,lim:c?c.lim:null,el:c?c.el:null,bt:G.bt,fel:G.fel,flim:G.flim,ft:G.ft,endT:G.endT,clock:G.clock,lines:c?[c.l1,c.l2]:null,res:G.res.join(''),kind:G.kind,copied:G.copied,fl:G.fl.map(f=>f.s)};},
+  sched(seed){return makeShift(seed).map(s=>({i:s.i,rule:s.rule,bad:s.bad,which:s.which,ask:s.ask,brief:s.brief,trap:s.trap,drv:s.drv?s.drv.id:null,name:s.name,corr:s.corr,lim:s.lim,vt:s.v.t,vi:V[s.rule].indexOf(s.v)}));},
+  seedOf(dk){return hashStr('pulled-over|'+dk);},reveal(){return {reveal:REVEAL,cue:CUE};},
+  cueTest(){ // draws every variant at its cue time (title screen only) and counts the pixels that change in the cue box: >= 150 px or the cue is not visible
+    const res=[],N=150;cx.setTransform(1,0,0,1,0,0);
+    const grab=(k,vi,t)=>{cx.save();cx.beginPath();cx.rect(0,0,SW,SH);cx.clip();SC[k](t,{v:V[k][vi],col:'#4c8be0',kind:'sedan'});cx.restore();return cx.getImageData(0,0,SW,SH).data;};
+    const diff=(a,b,bx)=>{let n=0;for(let y=Math.max(0,bx[1]);y<Math.min(SH,bx[1]+bx[3]);y++)for(let x=Math.max(0,bx[0]);x<Math.min(SW,bx[0]+bx[2]);x++){const i=(y*SW+x)*4;if(Math.abs(a[i]-b[i])>40||Math.abs(a[i+1]-b[i+1])>40||Math.abs(a[i+2]-b[i+2])>40)n++;}return n;};
+    for(const k of RK)V[k].forEach((v,vi)=>{const c=CUE[k][vi],tw=c[2],n=tw!==undefined?diff(grab(k,vi,c[0]),grab(k,tw,c[0]),c[1]):diff(grab(k,vi,c[0]-.05),grab(k,vi,c[0]+.25),c[1]);
+      res.push({rule:k,variant:vi,bad:v.bad,type:tw!==undefined?'twin':'appear',t:c[0],changed:n,ok:n>=N});});
+    return res;},
+  sceneCost(){const out={};cx.setTransform(1,0,0,1,0,0);for(const k of RK)V[k].forEach((v,vi)=>{const t0=performance.now();for(let i=0;i<120;i++){cx.save();cx.beginPath();cx.rect(0,0,SW,SH);cx.clip();SC[k](i*.03,{v,col:'#4c8be0',kind:'sedan'});cx.restore();}out[k+vi]=+((performance.now()-t0)/120).toFixed(3);});return out;}, // ms per scene draw
+  perf(){const st=a=>{const s=a.slice().sort((x,y)=>x-y),n=s.length;return n?{n,mean:+(s.reduce((p,q)=>p+q,0)/n).toFixed(2),p95:+s[Math.floor(n*.95)].toFixed(2),max:+s[n-1].toFixed(2)}:null;};return {jsMsPerFrame:st(PF),frameIntervalMs:st(PI)};},
+  options(){const o=[];for(const k of RK)V[k].forEach((v,i)=>{if(v.w)o.push({rule:k,variant:i,w:v.w});});return o;},
+  shareText(){return shareText();},copy(){doCopy();},
+  sim(o){o=o||{};const n=o.n||400,r=mulberry32((o.seed||1)>>>0);let w=0,ri=0,en=0;
+    for(let k=0;k<n;k++){const x=simRun((r()*4294967296)>>>0,o.pR===undefined?.75:o.pR,o.pF===undefined?.5:o.pF,r,o.policy,o.k);if(x.win)w++;ri+=x.right;en+=x.n;}
+    return {win:w/n,avgRight:ri/n,avgCars:en/n};}
+};
+</script>
+</body>
+</html>

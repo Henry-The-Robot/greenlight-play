@@ -28,8 +28,18 @@ canvas{display:block;touch-action:none;outline:none}
  crosswalk s6_p11_roadway-032, yellow s6_p11_roadway-009, siren s6_p11_run2-008, flagger s7_p11_run2-021, cyclist s8c-010,
  curb colors s6_p11_run3-017 (red) + s6_p11_run3-008 (white). Adult-trap list (hard:1) is Kyle's, not measured.
  Daily route = same 6 rules, order, re-asks and answer wording for everyone on a local calendar date (like Wordle); the answer LANES are shuffled on every attempt.
- Test hooks exist ONLY with ?dev=1: ts=4 (clock x4), seed=N (route seed, default = date as YYYYMMDD), window.__rush (state for the Playwright bot). Players never see them. */
-const W=390,H=844,CX=195,HOR=240,GY=700,Z1=40,SF=.28,PX=34,LN=3.2,DT=1/60,GAP=30,TEACH_T=2.5;
+ Test hooks exist ONLY with ?dev=1: ts=4 (clock x4), seed=N (route seed, default = date as YYYYMMDD), window.__rush (state for the Playwright bot). Players never see them.
+ V2 (card RH1, Kyle 2026-10-10: "too fast to read the info", "give it music and sound effects", "a better learning experience"), prototypes/DESIGN.md:
+ (7) pace: teach card waits for a tap (6 s max) while the road crawls; question line 1.5 s before the signs; signs of 2-5 words with the full answer in a bottom bar;
+     windows 7 s / 5 s / 4 s (first / second / third ask), fast window = first 40 percent; Calm doubles every window.
+ (8) learning: teach card = rule + picture + one "why" line; a miss stops the road and keeps rule + why until a tap (delayed feedback after a retrieval attempt,
+     Butler, Karpicke and Roediger 2007); right re-ask = "Locked in"; end card lists rules learned and rules to practise (prototypes/TEACHING.md sections 2-4);
+     every answer set holds a cautious-but-wrong option, so picking the safest-sounding words fails.
+ (9) audio, no files, ported from the slice (game/src/audio/engine.ts + schedule.ts): audio-clock look-ahead scheduler (Chris Wilson, "A Tale of Two Clocks"),
+     per-stem low-pass, anchored note envelopes, dark noise reverb, iOS audioSession, resume on first tap. New here: kick/hat and lead layers by streak, a riser at turbo,
+     a low-pass on the music while a card is open, and the sound effects. */
+const W=390,CX=195,HOR=240,Z1=40,SF=.28,PX=34,LN=3.2,DT=1/60,GAP=30,TEACH_MAX=6,TEACH_MIN=.7,PRE=1.5,FW=.4,CRAWL=2.5,VQ=15;
+let H=844,GY=700,ZN=-9.5;   /* ZN: the nearest ground distance that still reaches the bottom edge of the canvas */   /* logical height: 664 to 844, set by resize() from the window shape, so a phone browser with a toolbar still draws at full width and size */
 const Q=new URLSearchParams(location.search);
 const DEV=Q.get('dev')==='1';
 const TS=DEV?Math.max(.25,Math.min(8,+Q.get('ts')||1)):1;
@@ -42,17 +52,21 @@ const hash=n=>{const x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x)
 const FONT='"Trebuchet MS","Segoe UI",system-ui,sans-serif';
 const BC=['#2f80ed','#ff8a00','#e84393'];
 const cv=document.getElementById('c'),cx=cv.getContext('2d');
-function resize(){const s=Math.min(innerWidth/W,innerHeight/H),d=Math.min(devicePixelRatio||1,2.5);
- cv.style.width=W*s+'px';cv.style.height=H*s+'px';cv.width=Math.round(W*s*d);cv.height=Math.round(H*s*d);cx.setTransform(cv.width/W,0,0,cv.height/H,0,0)}
-addEventListener('resize',resize);resize();
+/* The logical canvas is always 390 wide and 664 to 844 tall. A phone browser with a toolbar is about 390x664: the canvas then fills it at scale 1,
+   instead of shrinking a fixed 390x844 picture to 79 percent (the text would be 21 percent smaller). Bottom things hang from H, so nothing is cut. */
+function resize(){const vw=innerWidth,vh=innerHeight;H=clamp(Math.round(W*vh/vw),664,844);GY=H-144;ZN=Z1*(GY-HOR)/(H-HOR)-Z1;
+ const s=Math.min(vw/W,vh/H),d=Math.min(devicePixelRatio||1,2.5);
+ cv.style.width=W*s+'px';cv.style.height=H*s+'px';cv.width=Math.round(W*s*d);cv.height=Math.round(H*s*d);cx.setTransform(cv.width/W,0,0,cv.height/H,0,0);
+ if(typeof relayout==='function')relayout()}
+addEventListener('resize',resize);
 
 /* ---------- projection and drawing helpers ---------- */
 const gg=z=>Z1/(Z1+z),sc=z=>SF+(1-SF)*gg(z),yy=z=>HOR+(GY-HOR)*gg(z);
-function gq(x1,x2,za,zb,col){za=Math.max(za,-9.5);if(zb<=za)return;const sa=sc(za),sb=sc(zb),ya=yy(za),yb=yy(zb);
+function gq(x1,x2,za,zb,col){za=Math.max(za,ZN);if(zb<=za)return;const sa=sc(za),sb=sc(zb),ya=yy(za),yb=yy(zb);
  cx.fillStyle=col;cx.beginPath();cx.moveTo(CX+x1*PX*sa,ya);cx.lineTo(CX+x2*PX*sa,ya);cx.lineTo(CX+x2*PX*sb,yb);cx.lineTo(CX+x1*PX*sb,yb);cx.fill()}
 function sideQuad(xm,za,zb,h0,h1,col){const sa=sc(za),sb=sc(zb),ya=yy(za),yb=yy(zb),xa=CX+xm*PX*sa,xb=CX+xm*PX*sb;
  cx.fillStyle=col;cx.beginPath();cx.moveTo(xa,ya-h0*PX*sa);cx.lineTo(xb,yb-h0*PX*sb);cx.lineTo(xb,yb-h1*PX*sb);cx.lineTo(xa,ya-h1*PX*sa);cx.fill()}
-function at(x,z,fn,a,rot){if(z<-9)return;const k=PX*sc(z);cx.save();cx.translate(CX+x*k,yy(z));cx.scale(k,k);
+function at(x,z,fn,a,rot){if(z<ZN+.5)return;const k=PX*sc(z);cx.save();cx.translate(CX+x*k,yy(z));cx.scale(k,k);
  if(a!==undefined&&a<1)cx.globalAlpha=Math.max(0,a);if(rot)cx.rotate(rot);fn();cx.restore()}
 const at0=at;
 /* meter-space shapes: origin ground centre, y up */
@@ -68,36 +82,104 @@ function wrapT(s,mw,sz){cx.font=`bold ${sz}px ${FONT}`;const L=[];let l='';
 const mu=n=>1+.5*(Math.min(Math.max(n,1),7)-1);
 const qr=(t,q)=>clamp((t-.3)/(q.W-.3),0,1);  /* speed ratio 0..1: the clock starts when the signs have landed (0.3 s) */
 
-/* ---------- content: 7 rules, 2 variants each (variant 0 = first ask, variant 1 = re-ask, new words) ---------- */
-/* v[i] = [right answer, wrong, wrong]. Right answer is never the strictly longest in any variant. */
+/* ---------- content: 8 rules, 2 variants each (variant 0 = first ask, variant 1 = re-ask, new words) ---------- */
+/* v[i] = {q: the scene question, a: [right answer, cautious-but-wrong, plain wrong]}; each answer = {s: sign text 2-5 words, t: full text for the bottom bar}.
+   Our own words (not handbook wording). Every right answer was checked against the fact text in bank/facts.json (ids below); every wrong answer is wrong in the scene shown.
+   The cautious-but-wrong option sounds safe (stop, wait, stay) but breaks the rule, so "pick the safest words" loses. The right answer is sometimes the most cautious
+   wording, sometimes the middle, sometimes the least (tune.js counts), and rights use "X, then Y" and "if it is safe" endings as often as wrongs do, so no single
+   pattern gives the answer away. */
 const RULES=[
 {k:'bus',id:'s7_p11_roadway-002',title:'SCHOOL BUS',fail:'ticket',name:'School bus',
  teach:'Red lights flash on a school bus? Stop. Wait until they go off.',
- v:[['Stop. Wait for lights off','Stop, then go if no kids show','Slow down and pass it'],['Stay put till lights are off','Stay put, then go if no kids','Creep past on the right side']]},
+ why:'Kids may cross in front of the bus.',short:'School bus red lights: stay stopped.',
+ v:[{q:'School bus ahead, red lights flashing. You?',a:[
+   {s:'Stay put',t:'Stay put till the flashing ends, then go'},
+   {s:'Stop, then ease past',t:'Stop and wait 10 seconds, then ease past'},
+   {s:'Slow down, pass left',t:'Slow down and pass on the left'}]},
+  {q:'Bus stopped, red lights flashing, kids stepping off. You?',a:[
+   {s:'Stay stopped',t:'Stay stopped until the lights are off'},
+   {s:'Wait, then ease past',t:'Wait a moment, then ease past slowly'},
+   {s:'Speed up and pass',t:'Speed up and pass before the kids cross'}]}]},
 {k:'4way',id:'s6_p11_roadway-001 + s6_p11_roadway-002',title:'4-WAY STOP',fail:'crash',name:'4-way stop',hard:1,
  roast:"You'd cause a pile-up at the 4-way stop.",
  teach:'At a 4-way stop, first to stop goes first. A tie? The car on your right goes.',
- v:[['Tie: car on your right goes','Tie: the car on your left goes','Tie: the bigger car goes'],['The car that stopped first','The car that is going faster','The bigger car']]},
+ why:'One order for every driver means no guessing.',short:'4-way stop: first to stop goes. Tie: right goes.',
+ v:[{q:'You and a car on your right arrive together. Who goes first?',a:[
+   {s:'The car on your right',t:'The driver on your right has right of way'},
+   {s:'The bigger car',t:'The bigger car goes first, as it is harder to stop'},
+   {s:'Whoever waits longer',t:'Whoever has been waiting longer goes first'}]},
+  {q:'A car on your left stopped before you. Who goes first?',a:[
+   {s:'Whoever stopped earlier',t:'The driver who stopped earlier'},
+   {s:'Whoever is on the right',t:'Whoever is on your right, to stay safe'},
+   {s:'The faster car',t:'The faster car goes first'}]}]},
 {k:'cross',id:'s6_p11_roadway-032',title:'CROSSWALK',fail:'ticket',name:'Crosswalk',
- teach:'A person in a crosswalk, marked or not? Stop. They go first.',
- v:[['Stop. They go first.','Slow down. Go around them.','Honk. Drive around.'],['Yield, striped or unmarked','Yield, but only at stripes','Go. There are no stripes.']]},
+ teach:'A person in a crosswalk, marked or not? Yield. Let them cross first.',
+ why:'A person on foot has no metal around them.',short:'Crosswalk, marked or not: yield to people.',
+ v:[{q:'A person walks across the stripes. You?',a:[
+   {s:'Wait for them',t:'Wait for them to finish crossing'},
+   {s:'Slow down, edge past',t:'Slow down, stay in your lane, and edge past them'},
+   {s:'Honk and drive past',t:'Honk and drive past them'}]},
+  {q:'A person steps off the corner at a junction. No stripes. You?',a:[
+   {s:'Yield, stripes or not',t:'Yield. A corner counts without stripes'},
+   {s:'Stop, but only at stripes',t:'Stop, stay put, and wait, but only at stripes'},
+   {s:'Go. No stripes here',t:'Go on. There are no stripes here'}]}]},
 {k:'yellow',id:'s6_p11_roadway-009',title:'YELLOW LIGHT',fail:'crash',name:'Yellow light',
- teach:'Yellow means red comes next. Stop if you can stop safely.',
- v:[['Stop if you can do so safely','Speed up. Beat the red.','Keep going. Yellow means go.'],['Stop if it is safe to','Go. Yellow means go.','Speed up and clear it fast']]},
+ teach:'Yellow means red comes next. Stop before the line if you can stop safely.',
+ why:'Cross traffic is about to get its green.',short:'Yellow: red is next. Stop if you safely can.',
+ v:[{q:'The light turns yellow. The white line is ahead. You?',a:[
+   {s:'Stop before the line',t:'Stop at the line, if it is safe'},
+   {s:'Stop past the line',t:'Slow down first, then stop past the line'},
+   {s:'Speed up, beat red',t:'Speed up and beat the red light'}]},
+  {q:'Yellow light, and you are far from the line. You?',a:[
+   {s:'Brake, then stop',t:'Brake early, then stop at the line'},
+   {s:'Stop on the crosswalk',t:'Stop on the crosswalk and stay put there'},
+   {s:'Go. Yellow means go',t:'Go on. Yellow means keep going'}]}]},
 {k:'amb',id:'s6_p11_run2-008',title:'SIREN BEHIND',fail:'ticket',name:'Siren behind you',
  teach:'Siren and lights behind you? Pull to the right edge and stop.',
- v:[['Pull right and stop fully','Pull right and slow down','Speed up to get away from it'],['Move right, stop, wait','Move left, slow, wait','Slow down and keep driving']]},
+ why:'A clear right edge lets the crew drive past fast.',short:'Siren behind you: pull right and stop.',
+ v:[{q:'An ambulance with a siren is behind you. You?',a:[
+   {s:'Pull right and stop',t:'Slow down, ease right and stop'},
+   {s:'Stop where you are',t:'Stop right where you are, and just wait'},
+   {s:'Speed up, clear the road',t:'Speed up to get out of its way'}]},
+  {q:'A police car with lights is behind you. You are in the middle lane. You?',a:[
+   {s:'Move right and stop',t:'Move to the right, stop, and let it pass'},
+   {s:'Pull left and stop',t:'Pull left, stop, and wait for it to pass'},
+   {s:'Stay in your lane',t:'Stay in your lane, stop, and let it pass'}]}]},
 {k:'flag',id:'s7_p11_run2-021',title:'FLAGGER',fail:'ticket',name:'Flagger',
  teach:'A flagger in a work zone? Obey the flagger like a traffic light.',
- v:[['Stop. Obey the flagger.','Slow down and drive through','Go if the road is clear'],['Stop and wait for a wave','Stop, then go if it is clear','Drive around the cones']]},
+ why:'The flagger sees the whole work zone. You see one lane.',short:'Work zone: obey the flagger like a light.',
+ v:[{q:'A flagger holds up a STOP sign. You?',a:[
+   {s:'Obey the sign',t:'Obey the sign till the flagger waves you on'},
+   {s:'Stop, then go if safe',t:'Stop, look, then go once the work zone looks safe'},
+   {s:'Wait, then drive on',t:'Stop, wait till the road is clear, then drive on'}]},
+  {q:'A flagger holds up a STOP sign and looks at you. You?',a:[
+   {s:'Wait for the wave',t:'Wait until the flagger waves you on, then go'},
+   {s:'Wait, then go if clear',t:'Wait until the road looks safe to you, then go'},
+   {s:'Slow down and drive on',t:'Slow down and drive on through'}]}]},
 {k:'bike',id:'s8c-010',title:'CYCLIST',fail:'ticket',name:'Cyclist',hard:1,
  roast:"You'd pass a cyclist with no room to spare.",
  teach:'Passing a cyclist? Leave at least 3 feet of space.',
- v:[['Give 3 feet when you pass','Pass fast at 1 foot','Pass close and flash lights'],['Leave 3 feet or more','Leave 2 feet, no more','Leave 1 foot if fast']]},
+ why:'A rider can wobble. Space gives them time.',short:'Passing a cyclist: leave 3 feet or more.',
+ v:[{q:'A cyclist rides ahead in your lane. You pass. You?',a:[
+   {s:'Give 3 feet or more',t:'Give them 3 feet or more, to be safe'},
+   {s:'Slow down, 2 feet away',t:'Slow down and pass them about 2 feet away'},
+   {s:'Pass fast and close',t:'Pass fast and close to save time'}]},
+  {q:'You come up behind the same cyclist. You?',a:[
+   {s:'Slow, pass with 3 feet',t:'Slow down, then pass with 3 feet or more'},
+   {s:'Slow down, leave 2 feet',t:'Slow right down, then leave about 2 feet of room'},
+   {s:'Wait, then pass close',t:'Wait behind them, then pass with 1 foot'}]}]},
 {k:'curb',id:'s6_p11_run3-017 + s6_p11_run3-008',title:'CURB COLORS',fail:'ticket',name:'Curb colors',hard:1,
  roast:"You'd park at the red curb and get towed.",
  teach:'Red curb: never stop. White curb: stop only to pick up or drop off people.',
- v:[['Do not stop, wait or park','Stop, but stay in the car','Stop for one minute only'],['Drop off people only','Drop off, then park here','Park for ten minutes']],
+ why:'Red keeps the way clear for crews. White keeps a drop-off spot free.',short:'Red curb: never stop. White: drop-off only.',
+ v:[{q:'A red curb ahead. You want to drop off a friend. You?',a:[
+   {s:'Keep going',t:'Keep going. Red means no stopping'},
+   {s:'Stop, stay in the car',t:'Stop briefly, but stay in the car'},
+   {s:'Park here, it is quick',t:'Park here for a minute, then leave'}]},
+  {q:'A white curb ahead. Your friend needs to get out. You?',a:[
+   {s:'Pull in, drop off',t:'Pull in just to drop off your friend'},
+   {s:'Drop off, then park',t:'Drop off, then stay parked and wait there'},
+   {s:'Park for ten minutes',t:'Park here for ten minutes'}]}],
  roasts:["You'd park at the red curb and get towed.","You'd park at the white curb and block the drop-off."]}
 ];
 RULES.forEach(r=>{r.roast=r.roast||"You'd lose your license at the "+r.name.toLowerCase()+"."});
@@ -125,60 +207,163 @@ function buildRoute(seed){
 function makeLanes(){let a;for(let k=0;k<300;k++){a=[0,0,0,0,1,1,1,1,2,2,2,2];for(let i=11;i>0;i--){const j=Math.floor(rnd()*(i+1));[a[i],a[j]]=[a[j],a[i]]}
  if(!a.some((v,i)=>i>1&&v===a[i-1]&&v===a[i-2]))break}return a}
 
-/* ---------- audio: three tiny WebAudio sounds, unlocked on the first tap ---------- */
-let AC=null;
-function audio(){try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();if(AC.state==='suspended')AC.resume()}catch(e){}}
-function tone(f0,f1,d,ty,vol,dl){if(!AC)return;const t=AC.currentTime+(dl||0),o=AC.createOscillator(),g=AC.createGain();o.type=ty;
- o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+d);g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(.0001,t+d);
- o.connect(g);g.connect(AC.destination);o.start(t);o.stop(t+d+.05)}
-const sfx={good:b=>{tone(520,980,.16,'triangle',.2);if(b){tone(740,1480,.22,'sine',.16,.09);tone(1100,1900,.25,'sine',.1,.18)}},
- bad:()=>{tone(200,55,.5,'sawtooth',.22);tone(120,50,.4,'square',.1,.05)},coin:()=>tone(980,1500,.08,'square',.05)};
+/* ---------- audio: WebAudio synth, no files. Ported from the slice (game/src/audio/engine.ts, schedule.ts) ---------- */
+const MK='greenlight.rush.muted',CK='greenlight.rush.calm';
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let MUTED=store.get(MK)==='1',CALM=store.get(CK)==='1',AC=null,AE=null;
+const m2hz=m=>440*Math.pow(2,(m-69)/12);
+/* one note envelope: 0, ramp up, hold, ramp down; every ramp is anchored by a setValueAtTime (schedule.ts noteEnvelope) */
+function noteEnv(p,t,hold,peak,att,rel){const a=Math.max(att,.008),h=Math.max(hold,a),r=Math.max(rel,.02);
+ p.setValueAtTime(0,t);p.linearRampToValueAtTime(peak,t+a);p.setValueAtTime(peak,t+h);p.linearRampToValueAtTime(0,t+h+r);return t+h+r}
+/* small dark reverb impulse: seeded noise through a one-pole low-pass (schedule.ts buildImpulse) */
+function impulse(len,seed,decay,damp){let a=seed>>>0;const rn=()=>{a=(a+0x6d2b79f5)>>>0;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296};
+ const o=new Float32Array(len);let y=0;for(let i=0;i<len;i++){y+=damp*(rn()*2-1-y);o[i]=y*Math.pow(1-i/len,decay)}return o}
+/* the driving loop: 112 BPM, 8 bars, A minor (Am F C G Am F G Em). Stems: pad, bass, pulse always; drums from streak x2; lead from streak x3. */
+const BPM=112,BEAT=60/BPM,BPB=4,LOOP_BEATS=32;
+const CH=[{b:45,p:[57,60,64]},{b:41,p:[53,57,60]},{b:48,p:[55,60,64]},{b:43,p:[55,59,62]},{b:45,p:[57,60,64]},{b:41,p:[53,57,60]},{b:43,p:[55,59,62]},{b:40,p:[52,55,59]}];
+const BASSP=[[0,.45,0,1],[.75,.2,0,.7],[1.5,.4,12,.8],[2,.45,0,.95],[2.75,.2,0,.7],[3.5,.4,7,.8]];  /* beat, length, semitones above the root, velocity */
+const PULSEP=[[0,1,2,1,0,1,2,1],[2,1,0,1,2,1,0,2]],LEADP=[[0,1],[1.5,2],[2,1],[3,0]];
+function buildScore(){const ev=[];CH.forEach((c,bar)=>{const b0=bar*BPB;
+ c.p.forEach(m=>ev.push({s:'pad',b:b0,d:BPB,m,v:1}));
+ BASSP.forEach(n=>ev.push({s:'bass',b:b0+n[0],d:n[1],m:c.b+n[2],v:n[3]}));
+ const tn=c.p.map(m=>m+12);PULSEP[bar%2].forEach((pk,i)=>ev.push({s:'pulse',b:b0+i*.5,d:.4,m:tn[pk%3],v:i%2?.6:.85}));
+ for(let k=0;k<4;k++){ev.push({s:'kick',b:b0+k,d:.2,m:0,v:1});ev.push({s:'hat',b:b0+k+.5,d:.05,m:0,v:k%2?.8:.55})}
+ const ln=c.p.map(m=>m+24);LEADP.forEach(n=>ev.push({s:'lead',b:b0+n[0],d:.6,m:ln[n[1]%3],v:.9}))});
+ ev.sort((a,b)=>a.b-b.b);return ev}
+const VOICE={pad:{o:[['sawtooth',-7,1,1],['sawtooth',7,1,1]],pk:.05,at:.3,rl:.5,ov:.35,lp:1400},
+ bass:{o:[['sine',0,1,1],['triangle',0,2,.22]],pk:.3,at:.015,rl:.12,ov:0,lp:900},
+ pulse:{o:[['triangle',-4,1,1],['triangle',4,1,1]],pk:.085,at:.01,rl:.15,ov:0,lp:2600},
+ lead:{o:[['square',0,1,1],['triangle',5,1,.5]],pk:.06,at:.01,rl:.2,ov:0,lp:2400}};
+const STEMS=['pad','bass','pulse','drums','lead'],MUS=.7;   /* music level under the effects */
+function makeEngine(ctx,live){
+ const E={ctx,layer:0,low:false,on:false,t0:0,idx:0,iter:0,sc:buildScore(),timer:null,live};
+ const now=ctx.currentTime;
+ E.master=ctx.createGain();E.master.gain.setValueAtTime(live&&MUTED?0:.8,now);
+ const comp=ctx.createDynamicsCompressor();comp.threshold.setValueAtTime(-14,now);comp.ratio.setValueAtTime(3,now);E.master.connect(comp);comp.connect(ctx.destination);
+ E.sfx=ctx.createGain();E.sfx.gain.setValueAtTime(.9,now);E.sfx.connect(E.master);
+ E.mgain=ctx.createGain();E.mgain.gain.setValueAtTime(0,now);E.mgain.connect(E.master);
+ E.mlp=ctx.createBiquadFilter();E.mlp.type='lowpass';E.mlp.frequency.setValueAtTime(18000,now);E.mlp.Q.setValueAtTime(.7,now);E.mlp.connect(E.mgain);   /* the card low-pass */
+ E.min=ctx.createGain();E.min.connect(E.mlp);
+ const hp=ctx.createBiquadFilter();hp.type='highpass';hp.frequency.setValueAtTime(220,now);const cv2=ctx.createConvolver(),len=Math.max(1,Math.round(1.2*ctx.sampleRate)),ir=ctx.createBuffer(2,len,ctx.sampleRate);
+ ir.getChannelData(0).set(impulse(len,7,3,.3));ir.getChannelData(1).set(impulse(len,11,3,.3));cv2.buffer=ir;
+ const snd=ctx.createGain();snd.gain.setValueAtTime(.2,now);const wet=ctx.createGain();wet.gain.setValueAtTime(.3,now);E.min.connect(snd);snd.connect(hp);hp.connect(cv2);cv2.connect(wet);wet.connect(E.mlp);
+ E.st={};for(const id of STEMS){const g=ctx.createGain(),lp=ctx.createBiquadFilter();lp.type='lowpass';lp.frequency.setValueAtTime((VOICE[id]||{lp:16000}).lp,now);lp.connect(g);g.connect(E.min);
+  g.gain.setValueAtTime(id==='drums'||id==='lead'?0:1,now);E.st[id]={g,lp}}
+ const nb=ctx.createBuffer(1,ctx.sampleRate,ctx.sampleRate),nd=nb.getChannelData(0);let sd=12345;for(let i=0;i<nd.length;i++){sd=(Math.imul(sd,1664525)+1013904223)>>>0;nd[i]=sd/2147483648-1}E.nb=nb;
+ E.voice=(ev,time)=>{const t=Math.max(time,ctx.currentTime),st=E.st[ev.s]&&E.st[ev.s].lp;
+  if(ev.s==='kick'){const o=ctx.createOscillator(),g=ctx.createGain();o.frequency.setValueAtTime(130,t);o.frequency.exponentialRampToValueAtTime(42,t+.13);const e=noteEnv(g.gain,t,.02,.55*ev.v,.004,.16);o.connect(g);g.connect(E.st.drums.g);o.start(t);o.stop(e+.03);return}
+  if(ev.s==='hat'){const s=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=ctx.createGain();s.buffer=nb;f.type='highpass';f.frequency.setValueAtTime(7000,t);const e=noteEnv(g.gain,t,.01,.16*ev.v,.002,.05);s.connect(f);f.connect(g);g.connect(E.st.drums.g);s.start(t);s.stop(e+.03);return}
+  const vo=VOICE[ev.s],env=ctx.createGain(),end=noteEnv(env.gain,t,ev.d*BEAT+vo.ov,vo.pk*ev.v,vo.at,vo.rl);env.connect(st);
+  for(const o of vo.o){const os=ctx.createOscillator();os.type=o[0];os.frequency.setValueAtTime(m2hz(ev.m)*o[2],t);os.detune.setValueAtTime(o[1],t);
+   if(o[3]===1)os.connect(env);else{const og=ctx.createGain();og.gain.setValueAtTime(o[3],t);os.connect(og);og.connect(env)}os.start(t);os.stop(end+.05)}};
+ /* look-ahead scheduler: a timer wakes up often, every note is placed on the AUDIO clock ahead of time (Chris Wilson, "A Tale of Two Clocks") */
+ E.pump=(horizon)=>{const sc=E.sc;for(let n=0;n<4000;n++){const ev=sc[E.idx],time=E.t0+(E.iter*LOOP_BEATS+ev.b)*BEAT;if(time>=horizon)break;
+  if(time+ev.d*BEAT+2>=ctx.currentTime)E.voice(ev,time);E.idx++;if(E.idx===sc.length){E.idx=0;E.iter++}}};
+ E.layerGain=()=>({drums:E.layer>=1?1:0,lead:E.layer>=2?1:0});
+ E.start=(offT)=>{if(E.on)return;E.on=true;E.idx=0;E.iter=0;const t=ctx.currentTime;E.t0=(offT!==undefined?offT:t+.12);
+  const lg=E.layerGain();for(const id of['drums','lead']){E.st[id].g.gain.cancelScheduledValues(t);E.st[id].g.gain.setValueAtTime(lg[id],t)}
+  E.mgain.gain.cancelScheduledValues(t);E.mgain.gain.setValueAtTime(0,t);E.mgain.gain.linearRampToValueAtTime(MUS*(E.low?.55:1),t+(live?.6:.05));
+  if(E.low)E.mlp.frequency.setValueAtTime(650,t);
+  if(live){E.pump(t+.4);E.timer=setInterval(()=>E.pump(ctx.currentTime+.4),80)}};
+ E.stop=(fade)=>{if(!E.on)return;E.on=false;const t=ctx.currentTime;E.mgain.gain.cancelScheduledValues(t);E.mgain.gain.setTargetAtTime(0,t,fade/3);if(E.timer){clearInterval(E.timer);E.timer=null}};
+ /* streak layers join at the next bar line, so they land on the beat */
+ E.setLayer=(n)=>{if(n===E.layer)return;E.layer=n;if(!E.on)return;const bar=BEAT*BPB,k=Math.ceil((ctx.currentTime+.1-E.t0)/bar),at=Math.max(ctx.currentTime,E.t0+k*bar),lg=E.layerGain();
+  for(const id of['drums','lead']){const p=E.st[id].g.gain;p.cancelScheduledValues(at);p.setTargetAtTime(lg[id],at,.2)}};
+ /* a teach card or a miss card is open: the music goes muffled and softer */
+ E.setLow=(on)=>{if(on===E.low)return;E.low=on;const t=ctx.currentTime;E.mlp.frequency.cancelScheduledValues(t);E.mlp.frequency.setTargetAtTime(on?650:18000,t,.12);
+  if(E.on){E.mgain.gain.cancelScheduledValues(t);E.mgain.gain.setTargetAtTime(MUS*(on?.55:1),t,.15)}};
+ return E}
+/* sound effects: short synth cues on their own bus (not muffled). tone() is the slice's cue voice. */
+function tone(E,t,midi,hold,peak,type,lp,att,rel,part){const c=E.ctx,env=c.createGain(),f=c.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(lp,t);
+ const end=noteEnv(env.gain,t,hold,peak,att,rel);env.connect(f);f.connect(E.sfx);
+ for(const [ratio,w] of part>0?[[1,1],[2,part]]:[[1,1]]){const o=c.createOscillator();o.type=type;o.frequency.setValueAtTime(m2hz(midi)*ratio,t);
+  if(w===1)o.connect(env);else{const og=c.createGain();og.gain.setValueAtTime(w,t);o.connect(og);og.connect(env)}o.start(t);o.stop(end+.05)}}
+function sweep(E,t,f0,f1,dur,type,peak,lp){const c=E.ctx,o=c.createOscillator(),g=c.createGain(),f=c.createBiquadFilter();o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(f1,t+dur);
+ f.type='lowpass';f.frequency.setValueAtTime(lp,t);const end=noteEnv(g.gain,t,dur*.3,peak,.01,dur*.7);o.connect(f);f.connect(g);g.connect(E.sfx);o.start(t);o.stop(end+.05)}
+function noise(E,t,dur,peak,ft,f0,f1,q){const c=E.ctx,s=c.createBufferSource(),f=c.createBiquadFilter(),g=c.createGain();s.buffer=E.nb;s.loop=true;f.type=ft;f.Q.setValueAtTime(q||1,t);
+ f.frequency.setValueAtTime(f0,t);f.frequency.exponentialRampToValueAtTime(f1,t+dur);const end=noteEnv(g.gain,t,dur*.4,peak,.01,dur*.6);s.connect(f);f.connect(g);g.connect(E.sfx);s.start(t);s.stop(end+.05)}
+const SFX={
+ swipe(E,t){noise(E,t,.14,.2,'bandpass',500,1800,2)},
+ right(E,t,fast){tone(E,t,74,.14,.5,'sine',3500,.015,.25,.15);tone(E,t+.11,81,.3,.55,'sine',3500,.015,.45,.15);
+  if(fast){noise(E,t+.05,.5,.12,'highpass',800,6000,.7);sweep(E,t+.05,300,1100,.35,'sine',.1,4000)}},
+ hit(E,t,crash){sweep(E,t,130,38,.4,'sine',crash?.7:.45,300);noise(E,t,crash?.4:.18,crash?.4:.2,'lowpass',1200,200,.7);
+  tone(E,t+.12,81,.1,.1,'square',3000,.01,.04);tone(E,t+.26,76,.1,.1,'square',3000,.01,.06)},   /* siren blip: 880 Hz then 660 Hz */
+ coin(E,t,i){const k=Math.min(i||0,8);tone(E,t,83+k,.05,.12,'square',3600,.004,.06);tone(E,t+.05,88+k,.09,.12,'square',3600,.004,.1)},
+ card(E,t){tone(E,t,79,.08,.3,'triangle',3000,.01,.2,.2);tone(E,t+.07,84,.14,.3,'triangle',3000,.01,.3,.2)},
+ strike(E,t){tone(E,t,67,.16,.5,'triangle',700,.03,.25);tone(E,t+.14,63,.3,.5,'triangle',700,.03,.45)},
+ heal(E,t){[72,76,79].forEach((m,i)=>tone(E,t+i*.08,m,.1,.35,'sine',3500,.01,.3,.2))},
+ pass(E,t){[72,76,79,84].forEach((m,i)=>tone(E,t+i*.11,m,.14,.4,'triangle',3500,.01,.3,.2));[72,76,79,84].forEach(m=>tone(E,t+.5,m,1.1,.18,'triangle',3000,.02,.9,.2))},
+ fail(E,t){[67,63,60,55].forEach((m,i)=>tone(E,t+i*.22,m,.2,.4,'sawtooth',800,.02,.3));sweep(E,t+.88,110,40,.6,'sine',.5,300)},
+ copy(E,t){tone(E,t,88,.04,.3,'sine',4000,.005,.08);tone(E,t+.07,95,.08,.3,'sine',4000,.005,.14)},
+ tick(E,t){tone(E,t,84,.03,.2,'sine',3000,.005,.06)},
+ riser(E,t){const c=E.ctx,o=c.createOscillator(),f=c.createBiquadFilter(),g=c.createGain();o.type='sawtooth';o.frequency.setValueAtTime(180,t);o.frequency.exponentialRampToValueAtTime(1500,t+1);
+  f.type='lowpass';f.frequency.setValueAtTime(400,t);f.frequency.exponentialRampToValueAtTime(7000,t+1);g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.12,t+.9);g.gain.linearRampToValueAtTime(0,t+1.05);
+  o.connect(f);f.connect(g);g.connect(E.sfx);o.start(t);o.stop(t+1.1);noise(E,t,1,.1,'highpass',500,5000,.7)}};
+function snd(name,a,b,dl){if(MUTED||!AE||AC.state!=='running')return;try{SFX[name](AE,AC.currentTime+.01+(dl||0),a,b)}catch(e){}}
+function musicOn(){if(AE&&!MUTED)AE.start()}
+const NOAUDIO=DEV&&Q.get('noaudio')==='1';   /* test only: the 60 bot pages of check.js skip audio so the test machine is not starved */
+function audio(){if(NOAUDIO)return;try{if(!AC){AC=new(window.AudioContext||window.webkitAudioContext)();
+  try{if(navigator.audioSession)navigator.audioSession.type='playback'}catch(e){}   /* iOS Safari 16.4+: play with the ringer switch on silent */
+  AE=makeEngine(AC,true);document.addEventListener('visibilitychange',()=>{if(!AC)return;if(document.hidden)AC.suspend().catch(()=>{});else AC.resume().catch(()=>{})});
+  if(G&&G.mode==='run')musicOn()}
+ if(AC.state!=='running')AC.resume().catch(()=>{})}catch(e){}}   /* iOS also reports 'interrupted' after a call or a lock: resume from any state but running */
+function setMuted(v){MUTED=v;store.set(MK,v?'1':'0');if(AE){const p=AE.master.gain,t=AC.currentTime;p.cancelScheduledValues(t);p.setTargetAtTime(v?0:.8,t,.03)}if(!v){audio();if(G&&G.mode==='run'&&G.phase!=='over')musicOn()}}
+const lowMusic=on=>{if(AE)AE.setLow(on)};
+function layerNow(){const m=mu(G.streak);return m>=3?2:m>=2?1:0}
 
 /* ---------- state ---------- */
 const LINK=location.protocol==='file:'?'https://henry-the-robot.github.io/greenlight-play/proto/rush-hour/':location.origin+location.pathname;
-const COPY={x:50,y:606,w:290,h:50},RUN={x:50,y:696,w:290,h:74};
+const COPY={x:50,y:606,w:290,h:50},RUN={x:50,y:696,w:290,h:74},MUTEB={x:336,y:0,w:54,h:50},CALMB={x:95,y:586,w:200,h:46};
+function relayout(){const c=H>=820;Object.assign(COPY,c?{x:50,y:606,w:290,h:50}:{x:50,y:H-166,w:290,h:46});Object.assign(RUN,c?{x:50,y:696,w:290,h:74}:{x:50,y:H-96,w:290,h:58});CALMB.y=Math.min(586,H-100)}
 const CARCOL=['#e63946','#2a9d8f','#f4a261','#6c5ce7','#00b4d8','#8d99ae','#e9c46a'];
 let G=null,ROUTE=buildRoute(SEED);
-function blank(mode){return{mode,t:0,runT:0,warp:1,pd:0,px:0,lanes:makeLanes(),flips:Array.from({length:12},()=>rnd()<.5),dist:0,v:13,vq:0,boost:0,dec:30,lane:1,xo:null,carX:0,tilt:0,spin:0,score:0,streak:0,bestStreak:0,strikes:0,right:0,done:0,mi:-1,
- miss:{},missOrder:[],phase:'calm',pt:0,calmT:1.3,pendingQuiz:false,cur:null,q:null,S:null,res:null,objs:[],pops:[],flash:null,shake:0,verdict:null,
+/* answer windows in seconds: first ask 7, re-ask 5, third ask 4 (the daily route has two asks per rule, so the third is reserved); Calm doubles them */
+const winOf=(ask,calm)=>(ask===1?7:ask===2?5:4)*(calm?2:1);
+function blank(mode){return{mode,t:0,runT:0,warp:1,warpOn:0,pd:0,px:0,lanes:makeLanes(),flips:Array.from({length:12},()=>rnd()<.5),dist:0,v:13,vq:0,boost:0,dec:30,lane:1,xo:null,carX:0,tilt:0,spin:0,score:0,streak:0,bestStreak:0,strikes:0,right:0,done:0,mi:-1,
+ miss:{},missOrder:[],phase:'calm',pt:0,td:undefined,calmT:1.3,pendingQuiz:false,cur:null,q:null,S:null,res:null,objs:[],pops:[],flash:null,shake:0,verdict:null,lock:null,rres:{},calm:CALM,coinN:0,
  log:[],gaps:[],endZ:1e9,popS:0,sirenT:0,endT:0,overT:0,result:null,conf:[],dmv:0,copied:0}}
 function fmtT(t){const n=Math.floor(t*10+1e-6),m=Math.floor(n/600),s=(n%600)/10;return m+':'+(s<10?'0':'')+s.toFixed(1)}
 const pop=(s,x,y,col,size)=>G.pops.push({s,x,y,col,size:size||22,t:0});
 const verdict=(s,col,size)=>{G.verdict={s,col,size:size||56,t:0}};
 const flash=(col,a)=>{G.flash={col,a}};
-function startRun(){const v=G?G.v:13;G=blank('run');G.v=Math.max(v,13);ROUTE=buildRoute(SEED);G.calmT=1.3;calmScript()}
-function spawnCoins(l,n,z0){for(let i=0;i<n;i++)G.objs.push({t:'coin',wz:G.dist+z0+i*5,x:(l-1)*LN,age:0})}
+function startRun(){const v=G?G.v:13;G=blank('run');G.v=Math.max(v,13);ROUTE=buildRoute(SEED);G.calmT=1.3;calmScript();lowMusic(false);if(AE)AE.layer=0;musicOn()}
+function spawnCoins(l,n,z0){G.coinN=0;for(let i=0;i<n;i++)G.objs.push({t:'coin',wz:G.dist+z0+i*5,x:(l-1)*LN,age:0})}
 function spawnCar(l,z0){G.objs.push({t:'car',wz:G.dist+z0,x:(l-1)*LN,age:0,col:CARCOL[(rnd()*CARCOL.length)|0]})}
 function calmScript(){const g=G,v=Math.max(g.v,22),L=g.lane,o=[0,1,2].filter(l=>l!==L),cl=o[(rnd()*2)|0];
  spawnCoins(cl,6,v*.9+6);if(g.mi>0)spawnCar(L,v*1.8+8)}
 function nextMoment(){const g=G;g.mi++;
  if(g.mi>=12){g.phase='finale';g.pt=0;g.dmv=g.dist+140;g.endZ=g.dmv+1;return}
  g.cur=ROUTE[g.mi];
- if(g.cur.ask===1){g.phase='teach';g.pt=0}else{g.phase='calm';g.pt=0;g.calmT=2;g.pendingQuiz=true;calmScript()}}
-function startQuiz(){const g=G,m=g.cur,rule=RULES[m.rule],tx=rule.v[m.ask-1]||rule.v[0],cl=m.pin?m.cl:g.lanes[g.mi];
+ if(g.cur.ask===1){g.phase='teach';g.pt=0;g.td=undefined;lowMusic(true);snd('card')}else{g.phase='calm';g.pt=0;g.calmT=1.3;g.pendingQuiz=true;calmScript()}}
+function closeTeach(){const g=G;if(g.td!==undefined)return;g.td=0;lowMusic(false);snd('tick')}
+function startQuiz(){const g=G,m=g.cur,rule=RULES[m.rule],vr=rule.v[m.ask-1]||rule.v[0],cl=m.pin?m.cl:g.lanes[g.mi];
  const o=[0,1,2].filter(l=>l!==cl);if(m.pin?m.flip:g.flips[g.mi])o.reverse();
- const ans=[];ans[cl]={t:tx[0],ok:true};ans[o[0]]={t:tx[1],ok:false};ans[o[1]]={t:tx[2],ok:false};ans.forEach(a=>{a.lines=wrapT(a.t,90,15)});
- const Wd=m.ask===1?4:Math.max(2.6,3.2-.1*(g.mi-3));
- g.vq=clamp(g.v,21,27);g.v=g.vq;g.lane=1;g.xo=null;g.boost=0;g.q={rule:m.rule,ans,cl,W:Wd,t:0,move:-1};
+ const ans=[];ans[cl]={s:vr.a[0].s,t:vr.a[0].t,ok:true};ans[o[0]]={s:vr.a[1].s,t:vr.a[1].t,ok:false};ans[o[1]]={s:vr.a[2].s,t:vr.a[2].t,ok:false};ans.forEach(a=>{a.lines=wrapT(a.s,92,16)});
+ const Wd=winOf(m.ask,g.calm);
+ /* the quiz opens with the question alone (q.t runs from -PRE to 0), then the signs land; the car eases to VQ and arrives at the scene when the window ends */
+ g.vq=VQ;g.lane=1;g.xo=null;g.boost=0;g.q={rule:m.rule,ans,cl,W:Wd,t:-PRE,move:-1,qs:vr.q};
  g.pendingQuiz=false;g.phase='quiz';g.res=null;
  for(const ob of g.objs)if(ob.fade===undefined)ob.fade=1;
- const cf=SC[rule.k],vz=cf.vz||0;
- const S=g.S={kind:rule.k,vi:m.ask-1,age:0,W:Wd,vz,az0:g.dist+GAP+(g.vq-vz)*Wd,az:0,lv:-1,lights:true,tHit:Wd+(GAP-3)/g.vq,sd:1,hitT:undefined,pxl:0,rz:-85};
+ const cf=SC[rule.k],vz=cf.vz||0,SW=Wd+PRE;
+ const S=g.S={kind:rule.k,vi:m.ask-1,age:0,W:SW,vz,az0:g.dist+GAP+10+(g.vq-vz)*SW,az:0,lv:-1,lights:true,tHit:SW+(GAP-3)/g.vq,sd:1,hitT:undefined,pxl:0,rz:-85};
  S.az=S.az0;if(cf.gap||(rule.k==='cross'&&m.ask===2)){S.gap=1;g.gaps.push([S.az0-8,S.az0+8])}
  g.gaps=g.gaps.filter(x=>x[1]>g.dist-60)}
-function resolve(){const g=G,q=g.q,rule=RULES[q.rule],a=q.ans[g.lane],ok=a.ok,r=q.move<0?1:qr(q.move,q);
- g.done++;g.res={ok,r,t:0,stage:0,hold:0,go:0,went:false,crashed:false,tk:0,early:ok&&r<.5,gained:0,lane:g.lane,boost:0};
+function resolve(){const g=G,q=g.q,rule=RULES[q.rule],a=q.ans[g.lane],ok=a.ok,r=q.move<0?1:qr(q.move,q),rr=g.rres[q.rule]=g.rres[q.rule]||{};
+ g.done++;rr['a'+g.cur.ask]=ok;
+ g.res={ok,r,t:0,stage:0,hold:0,go:0,went:false,crashed:false,tk:0,early:ok&&r<FW,gained:0,lane:g.lane,boost:0,card:false,cardT:0};
  const R=g.res;g.phase='res';g.xo=null;
  if(ok){g.right++;g.streak++;g.bestStreak=Math.max(g.bestStreak,g.streak);g.popS=1;
-  const sp=r<.5?Math.round(150*(1-r/.5)):0;R.gained=Math.round((100+sp)*mu(g.streak));g.score+=R.gained;R.boost=r<.5?11+15*(1-r/.5):0;
-  g.log[g.mi]=r<.5?'g':'y';
-  verdict(r<.2?'PERFECT!':r<.5?'TURBO!':'GOOD',r<.5?'#35e08a':'#cfe8ff');pop('+'+R.gained+'  x'+mu(g.streak).toFixed(1),CX,440,'#ffd23f',24);
-  sfx.good(r<.5);if(r<.5)flash('#ffffff',.4);
-  if(g.streak%4===0&&g.strikes>0){g.strikes--;pop('CLEAN RUN: -1 STRIKE',CX,476,'#7dffb0',20)}}
+  const sp=r<FW?Math.round(150*(1-r/FW)):0;R.gained=Math.round((100+sp)*mu(g.streak));g.score+=R.gained;R.boost=r<FW?11+15*(1-r/FW):0;
+  g.log[g.mi]=r<FW?'g':'y';
+  verdict(r<.2?'PERFECT!':r<FW?'TURBO!':'GOOD',r<FW?'#35e08a':'#cfe8ff');pop('+'+R.gained+'  x'+mu(g.streak).toFixed(1),CX,GY-260,'#ffd23f',24);
+  snd('right',r<FW);if(r<FW)flash('#ffffff',.4);
+  if(g.cur.ask===2)g.lock={t:rule.short,tt:0};   /* mastered: a right re-ask */
+  if(g.streak%4===0&&g.strikes>0){g.strikes--;pop('CLEAN RUN: -1 STRIKE',CX,GY-224,'#7dffb0',20);snd('heal',0,0,.4)}}
  else{g.strikes++;g.streak=0;g.miss[q.rule]=(g.miss[q.rule]||0)+1;if(g.missOrder.indexOf(q.rule)<0)g.missOrder.push(q.rule);if(!g.missFirst)g.missFirst={rule:q.rule,vi:g.cur.ask-1};g.log[g.mi]='r';
-  sfx.bad();verdict(rule.fail==='crash'?'CRASH!':'TICKET!','#ff4d4d',rule.fail==='crash'?64:60);g.shake=.9;flash('#ff2a2a',.45)}}
+  snd('strike');verdict(rule.fail==='crash'?'CRASH!':'TICKET!','#ff4d4d',rule.fail==='crash'?64:60);g.shake=.9;flash('#ff2a2a',.45)}
+ if(AE)AE.setLayer(layerNow())}
 function goStart(){const g=G,R=g.res,S=g.S;R.went=true;g.boost=R.boost;g.xo=null;if(S){S.lv=0;S.sd=g.lane===2?-1:1}
- if(R.early){flash('#ffffff',.55);pop('BOOST!',CX,400,'#7dffb0',40);g.popS=1}
+ if(R.early){flash('#ffffff',.55);pop('BOOST!',CX,GY-300,'#7dffb0',40);g.popS=1}
  spawnCoins(g.lane,R.early?14:5,18)}
 function endRes(){const g=G;
  if(!g.res.ok&&g.strikes>=3){finish(false,'strikes');return}
@@ -193,24 +378,26 @@ function stepRes(){const g=G,R=g.res,S=g.S,rule=RULES[g.q.rule],cf=SC[rule.k],ba
    if(R.stage===1){R.hold=0;if(S)S.lights=false}
    if(R.t>7)R.stage=2}
   else if(R.stage===1){R.hold+=DT;if(R.hold>=(cf.hold||1))R.stage=2}
-  if(R.stage===2){if(!R.went)goStart();R.go+=DT;vT=base+g.boost;if(R.go>.8)endRes()}
+  if(R.stage===2){if(!R.went)goStart();R.go+=DT;vT=base+g.boost;if(R.go>.5)endRes()}
  }else{
   const crash=rule.fail==='crash';g.boost=0;
-  const tick=()=>{if(!R.tk){R.tk=1;g.shake=.5;g.sirenT=1.8;pop('TICKET  -1 STRIKE',CX,450,'#ff6b6b',28)}};
+  const tick=()=>{if(!R.tk){R.tk=1;R.ev=R.t;g.shake=.5;g.sirenT=1.8;pop('TICKET  -1 STRIKE',CX,GY-250,'#ff6b6b',28);snd('hit',false)}};
   if(crash){g.xo=0;/* the car drifts into the middle of the junction so the hit shows in any lane */
-   if(!R.crashed&&S&&S.az-g.dist<=3){R.crashed=true;S.hitT=S.age;g.v=g.vq*.18;g.shake=1.3;g.spin=.5;flash('#ff2a2a',.6);pop('CRASH  -1 STRIKE',CX,450,'#ff6b6b',28);if(navigator.vibrate)navigator.vibrate(60)}
-   vT=R.crashed?0:g.vq;g.dec=40}
+   if(!R.crashed&&S&&S.az-g.dist<=3){R.crashed=true;R.ev=R.t;S.hitT=S.age;g.v=Math.min(g.v,g.vq)*.18;g.shake=1.3;g.spin=.5;flash('#ff2a2a',.6);pop('CRASH  -1 STRIKE',CX,GY-250,'#ff6b6b',28);snd('hit',true);if(navigator.vibrate)navigator.vibrate(60)}
+   vT=R.crashed?0:g.vq*1.4;g.dec=40}
   else if(rule.k==='curb'){g.xo=R.t>.1?4.3:null;vT=R.t>.3?0:g.vq;g.dec=14;if(R.t>.7)tick()}
   else{/* ticket: issued when the car reaches the scene (the siren passes at 0.3 s); the prop then jumps aside so the car does not drive through it */
    const reach=!S||(S.kind==='amb'?R.t>.3:S.az-g.dist<=9);
    if(reach&&S&&S.lv<0){S.lv=0;S.sd=g.lane===2?-1:1;S.pxl=pedX(S)}
-   if(reach||R.t>2)tick();vT=R.tk?g.vq*.6:g.vq;g.dec=14}
-  if(R.t>=2.45)endRes()}
+   if(reach||R.t>2)tick();vT=R.tk?0:g.vq*1.4;g.dec=R.tk?22:14}
+  /* the miss card: the road has stopped, the right lane glows, the rule and its why stay until a tap (no timeout) */
+  if(!R.card&&((R.ev!==undefined&&R.t-R.ev>=.9)||R.t>4.5)){R.card=true;R.cardT=0;lowMusic(true);snd('card')}
+  if(R.card){R.cardT+=DT;vT=0;g.dec=30;if(R.dt!==undefined){R.dt+=DT;if(R.dt>=.35){lowMusic(false);endRes()}}}}
  return vT}
 function stepFinale(){const g=G;g.pt+=DT;const d=g.dmv-9.5-g.dist;g.dec=18;
  if(g.v<.4&&d<2.5&&g.pt>1)finish(g.right>=9&&g.strikes<3,g.right<9?'score':'ok');
  return d>0?Math.min(30+g.boost,Math.sqrt(2*8*d)):0}
-function finish(win,why){const g=G;if(g.phase==='over')return;g.phase='over';g.overT=0;g.result={win,why};
+function finish(win,why){const g=G;if(g.phase==='over')return;g.phase='over';g.overT=0;g.result={win,why};lowMusic(false);if(AE)AE.stop(1.2);snd(win?'pass':'fail');
  if(win)for(let i=0;i<110;i++)g.conf.push({x:rnd()*W,y:-20-rnd()*300,vx:(rnd()-.5)*60,vy:60+rnd()*140,c:['#ffd23f','#35e08a','#4cc9f0','#ff5d8f','#fff'][(rnd()*5)|0],w:4+rnd()*5});
  else g.shake=.5}
 function pedX(S){return clamp((S.age-S.tHit+1.2)*2.2,-6.2,6.2)}
@@ -222,17 +409,19 @@ function updObjs(){const g=G,ok=g.phase==='calm'||g.phase==='teach'||g.phase==='
  for(const o of g.objs){o.age+=DT;if(o.fade!==undefined)o.fade-=DT*2.5;if(o.hit){o.x+=o.vx*DT;o.rot+=o.vr*DT}
   const z=o.wz-g.dist;
   if(ok&&!o.dead&&o.fade===undefined&&!o.hit&&z<2.2&&z>-1.6&&Math.abs(g.carX-o.x)<1.5){
-   if(o.t==='coin'){o.dead=1;g.score+=10;sfx.coin();pop('+10',CX+g.carX*PX,610,'#ffd23f',16)}
-   else if(g.phase!=='res'){o.hit=1;o.vx=(o.x>=g.carX?1:-1)*9;o.vr=(o.x>=g.carX?1:-1)*5;o.rot=0;g.v*=.5;g.boost=0;g.shake=.5;g.score=Math.max(0,g.score-50);pop('BUMP -50',CX,560,'#ff9f43',24);sfx.bad()}}}
+   if(o.t==='coin'){o.dead=1;g.score+=10;snd('coin',g.coinN++);pop('+10',CX+g.carX*PX,GY-90,'#ffd23f',16)}
+   else if(g.phase!=='res'){o.hit=1;o.vx=(o.x>=g.carX?1:-1)*9;o.vr=(o.x>=g.carX?1:-1)*5;o.rot=0;g.v*=.5;g.boost=0;g.shake=.5;g.score=Math.max(0,g.score-50);pop('BUMP -50',CX,GY-140,'#ff9f43',24);snd('hit',false)}}}
  g.objs=g.objs.filter(o=>!o.dead&&(o.fade===undefined||o.fade>0)&&o.wz-g.dist>-10&&Math.abs(o.x)<16)}
 function updFx(){const g=G;g.shake*=.9;if(g.flash){g.flash.a-=DT*1.8;if(g.flash.a<=0)g.flash=null}
  g.pops.forEach(p=>{p.t+=DT});g.pops=g.pops.filter(p=>p.t<1.1);if(g.verdict){g.verdict.t+=DT;if(g.verdict.t>1.6)g.verdict=null}
+ if(g.lock){g.lock.tt+=DT;if(g.lock.tt>2.2)g.lock=null}
  g.popS*=.9;g.sirenT=Math.max(0,g.sirenT-DT);g.copied=g.copied>0?Math.max(0,g.copied-DT):Math.min(0,g.copied+DT);
  for(const c of g.conf){c.x+=c.vx*DT;c.y+=c.vy*DT;c.vy+=40*DT}g.conf=g.conf.filter(c=>c.y<H+20)}
-/* Early lock-in (speedrun lever): commit inside the turbo zone and stay put 0.45 s -> the rest of the window runs 3x fast.
+/* Early lock-in (speedrun lever): commit inside the fast window (first 40 percent) and stay put 0.45 s -> the rest of the window runs 3x fast.
    Real time saved = (rest of window) x 2/3. The run clock counts real time (DT / warp). Any new input cancels the warp. */
 function step(){const g=G;let n=1;g.warp=1;g.pd=g.dist;g.px=g.carX;
- if(g.mode==='run'&&g.phase==='quiz'&&g.q&&g.q.move>=0&&qr(g.q.move,g.q)<.5&&g.q.t>=g.q.move+.45){n=3;g.warp=3}
+ if(g.mode==='run'&&g.phase==='quiz'&&g.q&&g.q.move>=0&&qr(g.q.move,g.q)<FW&&g.q.t>=g.q.move+.45){n=3;g.warp=3}
+ if(n===3&&!g.warpOn)snd('riser');g.warpOn=n===3?1:0;
  for(let i=0;i<n;i++){stepOne();if(i<n-1&&G.phase!=='quiz')break}}
 function stepOne(){const g=G;g.t+=DT;
  if(g.mode==='title'){g.v=13;g.dist+=g.v*DT;g.carX=Math.sin(g.t*.8)*.6;return}
@@ -241,40 +430,49 @@ function stepOne(){const g=G;g.t+=DT;
  g.boost=Math.max(0,g.boost-6.5*DT);if(g.phase!=='over')g.runT+=DT/g.warp;
  switch(g.phase){
   case'calm':g.pt+=DT;vT=base+g.boost;if(g.pt>=g.calmT){if(g.pendingQuiz)startQuiz();else nextMoment()}break;
-  case'teach':g.pt+=DT;vT=base+g.boost;if(g.pt>=TEACH_T)startQuiz();break;
-  case'quiz':g.q.t+=DT;g.v=g.vq;vT=g.vq;if(g.q.t>=g.q.W)resolve();break;
+  case'teach':g.pt+=DT;vT=CRAWL;g.dec=16;if(g.td===undefined){if(g.pt>=TEACH_MAX)closeTeach()}else{g.td+=DT;if(g.td>=.3)startQuiz()}break;
+  case'quiz':g.q.t+=DT;vT=g.vq;if(g.q.t>=g.q.W)resolve();break;
   case'res':vT=stepRes();break;
   case'finale':vT=stepFinale();break;
   case'over':g.overT+=DT;g.dec=20;if(g.overT>=(g.result.win?1.5:1)){g.mode='end';g.endT=0}break}
- if(g.phase!=='quiz')g.v+=clamp(vT-g.v,-g.dec*DT,14*DT);
+ g.v+=clamp(vT-g.v,-g.dec*DT,14*DT);
  g.dist+=g.v*DT;
  const tx=g.xo!==null?g.xo:(g.lane-1)*LN,dx=tx-g.carX;g.carX+=dx*(1-Math.exp(-DT*(g.xo!==null?5:15)));g.tilt=lerp(g.tilt,clamp(dx*.14,-.22,.22),.3);g.spin*=.93;
  updScene();updObjs();updFx()}
 
 /* ---------- share text and input ---------- */
 const roastOf=m=>{const r=RULES[m.rule];return(r.roasts&&r.roasts[m.vi])||r.roast};
+/* rule lists for the end card: mastered = a right re-ask; to practise = a wrong answer that was not repaired by a right re-ask */
+function ruleLists(){const g=G,mastered=[],practise=[];
+ Object.keys(g.rres).forEach(k=>{const r=g.rres[k];if(r.a2===true)mastered.push(+k);else if(r.a2===false||r.a1===false)practise.push(+k)});return{mastered,practise}}
 function shareText(){const g=G,sq={g:'\u{1F7E9}',y:'\u{1F7E8}',r:'\u{1F7E5}'},row=Array.from({length:12},(_,i)=>sq[g.log[i]]||'⬛').join('');
- const win=g.result&&g.result.win,roast=g.missFirst?roastOf(g.missFirst):'Clean run. Nothing to roast.';
- return'Green Light: Rush Hour '+DAY+'\n'+(win?'PASSED ':'SUSPENDED ')+g.right+'/12  '+fmtT(g.runT)+'  '+g.score+' pts\n'+row+'\n'+roast+'\n'+LINK}
+ const win=g.result&&g.result.win,roast=g.missFirst?roastOf(g.missFirst):'Clean run. Nothing to roast.',rl=ruleLists();
+ return'Green Light: Rush Hour '+DAY+(g.calm?' (calm run)':'')+'\n'+(win?'PASSED ':'SUSPENDED ')+g.right+'/12  '+fmtT(g.runT)+'  '+g.score+' pts\n'+row+'\nRules locked in: '+rl.mastered.length+'/6\n'+roast+'\n'+LINK}
 function fallbackCopy(s,done){const t=document.createElement('textarea');t.value=s;t.style.cssText='position:fixed;left:-999px;top:0';document.body.appendChild(t);t.select();
  let ok=false;try{ok=document.execCommand('copy')}catch(e){}t.remove();done(ok)}
-function copyResult(){const s=shareText(),done=ok=>{G.copied=ok?1.6:-1.6};if(DEV)window.__lastCopy=s;
+function copyResult(){const s=shareText(),done=ok=>{G.copied=ok?1.6:-1.6};if(DEV)window.__lastCopy=s;snd('copy');
  try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(s).then(()=>done(true),()=>fallbackCopy(s,done));return}}catch(e){}fallbackCopy(s,done)}
 function setLane(l,confirm){const g=G;if(g.mode!=='run'||(l===g.lane&&!confirm))return;
- if(g.phase==='quiz'){g.lane=l;g.q.move=g.q.t}
- else if(g.phase==='calm'||g.phase==='teach'||g.phase==='finale'||(g.phase==='res'&&g.res.stage===2))g.lane=l}
+ if(g.phase==='quiz'){if(g.q.t<0)return;if(l!==g.lane)snd('swipe');g.lane=l;g.q.move=g.q.t}
+ else if(g.phase==='calm'||g.phase==='teach'||g.phase==='finale'||(g.phase==='res'&&g.res.stage===2)){if(l!==g.lane)snd('swipe');g.lane=l}}
+/* a tap closes the open card (teach card after 0.7 s, miss card after 0.6 s); otherwise a tap jumps to that lane */
+function tapAt(x,y){const g=G;if(g.mode!=='run')return;
+ if(g.phase==='teach'){if(g.pt>=TEACH_MIN)closeTeach();return}
+ if(g.phase==='res'&&g.res&&g.res.card){if(g.res.dt===undefined&&g.res.cardT>=.6){g.res.dt=0;snd('tick')}return}
+ setLane(x<W/3?0:x>2*W/3?2:1,true)}
 let ptr=null;
 function lp(e){const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]}
 const hit=(b,x,y)=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h;
 /* end card buttons act on pointerup (a real touch "activation": clipboard and audio need it on iOS); a stray tap elsewhere does nothing */
 cv.addEventListener('pointerdown',e=>{e.preventDefault();audio();if(ptr&&ptr.id!==e.pointerId&&performance.now()-ptr.t<1500)return;  /* one finger at a time: a second finger or a palm is ignored (a stale one expires) */
  try{cv.setPointerCapture(e.pointerId)}catch(_){}const[x,y]=lp(e);ptr={id:e.pointerId,t:performance.now(),x0:x,y0:y,ox:x,fired:0};
- if(G.mode==='title'){startRun();ptr.fired=1}else if(G.mode==='end')ptr.fired=1});
+ if(hit(MUTEB,x,y)){ptr.fired=1;setMuted(!MUTED);return}   /* mute button, top right, every screen */
+ if(G.mode==='title'){if(hit(CALMB,x,y)){ptr.fired=1;CALM=!CALM;store.set(CK,CALM?'1':'0');G.calm=CALM;snd('tick');return}startRun();ptr.fired=1}else if(G.mode==='end')ptr.fired=1});
 cv.addEventListener('pointermove',e=>{if(!ptr||e.pointerId!==ptr.id)return;const[x]=lp(e),dx=x-ptr.ox;
  if(!ptr.fired&&Math.abs(dx)>=24){ptr.fired=1;ptr.ox=x;setLane(clamp(G.lane+(dx>0?1:-1),0,2),false)}});  /* one lane per swipe */
 cv.addEventListener('pointerup',e=>{audio();if(!ptr||e.pointerId!==ptr.id)return;const[x,y]=lp(e);
  if(G.mode==='end'){if(Math.abs(x-ptr.x0)<20&&Math.abs(y-ptr.y0)<20){if(hit(COPY,x,y))copyResult();else if(hit(RUN,x,y)&&G.endT>.8)startRun()}ptr=null;return}
- if(!ptr.fired&&Math.abs(x-ptr.x0)<14)setLane(x<W/3?0:x>2*W/3?2:1,true);ptr=null});
+ if(!ptr.fired&&Math.abs(x-ptr.x0)<14)tapAt(x,y);ptr=null});
 cv.addEventListener('pointercancel',e=>{if(ptr&&e.pointerId===ptr.id)ptr=null});
 cv.addEventListener('contextmenu',e=>e.preventDefault());
 
@@ -291,19 +489,20 @@ function drawSky(){if(!skyG){skyG=cx.createLinearGradient(0,0,0,HOR);skyG.addCol
  for(let x=-20,i=0;x<W+30;x+=26,i++){const h=22+hash(i*3.3)*52;cx.fillStyle=i%2?'#9ec3e6':'#86b0d8';cx.fillRect(x,HOR-h,28,h+2)}}
 function drawWorld(){const g=G,S=g.S,d=g.dist;
  drawSky();cx.fillStyle='#7f8a96';cx.fillRect(-30,HOR,W+60,H-HOR+30);
- gq(-7.6,7.6,-11,9999,'#cfc9ba');
+ gq(-7.6,7.6,-60,9999,'#cfc9ba');
  const b6=Math.floor(d/6);for(let k=-2;k<30;k++)if((b6+k)&1){const a=(b6+k)*6-d;gq(5,7.6,a,a+6,'#c2bcad');gq(-7.6,-5,a,a+6,'#c2bcad')}
- gq(-5,5,-11,9999,'#3a404d');
+ gq(-5,5,-60,9999,'#3a404d');
  const b12=Math.floor(d/12);for(let k=-1;k<24;k++)if((b12+k)&1){const a=(b12+k)*12-d;gq(-5,5,a,a+12,'#3f4655')}
- gq(-5.08,-4.92,-11,9999,'#e8e3d3');gq(4.92,5.08,-11,9999,'#e8e3d3');gq(-4.7,-4.55,-11,9999,'#f2f2f2');gq(4.55,4.7,-11,9999,'#f2f2f2');
+ gq(-5.08,-4.92,-60,9999,'#e8e3d3');gq(4.92,5.08,-60,9999,'#e8e3d3');gq(-4.7,-4.55,-60,9999,'#f2f2f2');gq(4.55,4.7,-60,9999,'#f2f2f2');
  if(S&&S.kind==='curb')gq(4.95,5.8,S.az-26-d,S.az+22-d,S.vi===1?'#f7f7f7':'#d62d20');
  for(const x of g.gaps)gq(-60,60,x[0]-d,x[1]-d,'#3a404d');
  const n9=Math.floor(d/9);for(let k=-1;k<24;k++){const a=(n9+k)*9;if(gapHit(a,a+4.5))continue;gq(-1.68,-1.52,a-d,a+4.5-d,'#f4f4f4');gq(1.52,1.68,a-d,a+4.5-d,'#f4f4f4')}
  if(S){const z=S.az-d;
   if(S.kind==='cross'&&S.vi===0)for(let x=-4.6;x<4.5;x+=1)gq(x,x+.55,z-2.5,z+2.5,'#f4f4f4');
   if(S.gap)gq(-4.8,4.8,z-9.6,z-9.1,'#fff')}
- if(g.phase==='quiz'||g.phase==='res'){const q=g.q;if(q)for(let i=0;i<3;i++){const sel=i===g.lane;
-  gq((i-1)*LN-1.5,(i-1)*LN+1.5,-9,300,'rgba('+BCA[i]+','+(sel?.28+.08*Math.sin(g.t*8):.12)+')')}}}
+ if((g.phase==='quiz'&&g.q&&g.q.t>=0)||g.phase==='res'){const q=g.q,R=g.res,glow=R&&!R.ok&&R.card;if(q)for(let i=0;i<3;i++){const sel=i===g.lane;
+  if(glow)gq((i-1)*LN-1.5,(i-1)*LN+1.5,-60,300,i===q.cl?'rgba(60,255,130,'+(.45+.2*Math.sin(g.t*7))+')':'rgba(20,30,50,.25)');   /* the right lane glows after a miss */
+  else gq((i-1)*LN-1.5,(i-1)*LN+1.5,-60,300,'rgba('+BCA[i]+','+(sel?.28+.08*Math.sin(g.t*8):.12)+')')}}}
 function sideQ(xs,a,b,h,col,z1,z2){if(z2-z1>2)sideQuad(xs,z1+.8,z2-.8,h,h+1.8,col)}
 function drawBuildings(){const BLK=20,d=G.dist,i0=Math.floor((d-10)/BLK),i1=Math.ceil((d+240)/BLK);
  for(let i=i1;i>=i0;i--)for(let sd=-1;sd<=1;sd+=2){
@@ -394,6 +593,7 @@ function drawSpeedLines(){const f=clamp((G.v*G.warp-27)/12,0,1);if(f<.03)return;
   cx.beginPath();cx.moveTo(CX+Math.cos(a)*r0,330+Math.sin(a)*r0*1.5);cx.lineTo(CX+Math.cos(a)*r1,330+Math.sin(a)*r1*1.5);cx.stroke()}}
 
 /* ---------- HUD, boards, cards ---------- */
+function fitT(s,x,y,mw,sz,col,al,st){cx.font=`bold ${sz}px ${FONT}`;const w=cx.measureText(s).width;T(s,x,y,w>mw?Math.max(12,sz*mw/w):sz,col,al,st)}
 function drawHUD(){const g=G;if(g.mode==='title')return;
  const gr=cx.createLinearGradient(0,0,0,72);gr.addColorStop(0,'rgba(5,10,30,.78)');gr.addColorStop(1,'rgba(5,10,30,0)');cx.fillStyle=gr;cx.fillRect(0,0,W,72);
  cx.save();cx.translate(16,22);const pk=1+g.popS*.6;cx.scale(pk,pk);T(g.streak>0?'x'+mu(g.streak).toFixed(1):'x1.0',0,0,26,g.streak>0?'#ffd23f':'#9fb3c8','left',4);cx.restore();
@@ -401,15 +601,22 @@ function drawHUD(){const g=G;if(g.mode==='title')return;
  T(fmtT(g.runT),CX,22,26,'#ffffff','center',4);
  for(let i=0;i<3;i++){const x=CX-24+i*24,on=i<g.strikes;cx.beginPath();cx.arc(x,45,8,0,6.3);cx.fillStyle=on?'#e5383b':'rgba(255,255,255,.15)';cx.fill();
   if(on){cx.strokeStyle='#fff';cx.lineWidth=2.5;cx.beginPath();cx.moveTo(x-4,41);cx.lineTo(x+4,49);cx.moveTo(x+4,41);cx.lineTo(x-4,49);cx.stroke()}}
- T(String(g.score),374,22,26,'#fff','right',4);T('SCORE',374,43,11,'#c7d6e6','right');
+ T(String(g.score),326,22,26,'#fff','right',4);T(g.calm?'SCORE  CALM':'SCORE',326,43,11,g.calm?'#9fe8ff':'#c7d6e6','right');
  cx.fillStyle='rgba(255,255,255,.25)';cx.fillRect(30,57,310,3);
  for(let i=0;i<12;i++){const x=30+i*(310/11),c=g.log[i],hard=ROUTE[i]&&RULES[ROUTE[i].rule].hard;
   cx.beginPath();cx.arc(x,58.5,i===g.mi?6:4.5,0,6.3);cx.fillStyle=c==='g'?'#2ecc71':c==='y'?'#f1c40f':c==='r'?'#e74c3c':'rgba(255,255,255,.35)';cx.fill();
   if(i===g.mi||hard){cx.lineWidth=hard?1.5:2;cx.strokeStyle=hard?'#ff9f6b':'#fff';cx.stroke()}}
  T('DMV',366,58,11,'#ffd23f','center')}
+/* mute button, top right, on every screen; the choice is remembered */
+function drawMute(){cx.save();cx.translate(363,25);cx.beginPath();cx.arc(0,0,17,0,6.3);cx.fillStyle='rgba(5,10,30,.7)';cx.fill();cx.lineWidth=2;cx.strokeStyle='rgba(255,255,255,.75)';cx.stroke();
+ cx.fillStyle='#fff';cx.beginPath();cx.moveTo(-9,-3.5);cx.lineTo(-4,-3.5);cx.lineTo(1,-8);cx.lineTo(1,8);cx.lineTo(-4,3.5);cx.lineTo(-9,3.5);cx.closePath();cx.fill();
+ cx.lineWidth=2.2;cx.lineCap='round';
+ if(MUTED){cx.strokeStyle='#ff6b6b';cx.beginPath();cx.moveTo(5,-5);cx.lineTo(12,5);cx.moveTo(12,-5);cx.lineTo(5,5);cx.stroke()}
+ else{cx.strokeStyle='#fff';cx.beginPath();cx.arc(2,0,6,-.9,.9);cx.stroke();cx.beginPath();cx.arc(2,0,10,-.9,.9);cx.stroke()}
+ cx.restore()}
 function exitOff(i){const g=G,R=g.res;if(!R)return 0;
  if(R.ok)return-ease((R.t-.35)/.45)*260;
- if(i===g.q.cl)return-ease((R.t-2.2)/.3)*260;
+ if(i===g.q.cl)return-(R.dt===undefined?0:ease(R.dt/.3))*260;   /* after a miss the right sign stays until the card is closed */
  if(i===R.lane)return-ease((R.t-1.4)/.4)*260;
  return-ease((R.t-.3)/.4)*260}
 function board(i,x,y,st,pulse){const a=G.q.ans[i],sel=st===1;cx.save();cx.translate(x,y+44);const s=sel?1.07:1;cx.scale(s,s);
@@ -417,34 +624,65 @@ function board(i,x,y,st,pulse){const a=G.q.ans[i],sel=st===1;cx.save();cx.transl
  cx.lineWidth=sel?5:3;cx.strokeStyle=sel?'#ffe45c':(st===2&&pulse?'#d9ffd9':'#fff');cx.stroke();
  cx.save();RR(-52,-44,104,16,10);cx.clip();cx.fillStyle=BC[i];cx.fillRect(-52,-44,104,16);cx.restore();
  cx.fillStyle='#fff';cx.beginPath();cx.moveTo(-8,-40);cx.lineTo(8,-40);cx.lineTo(0,-31);cx.fill();
- const L=a.lines,lh=17,y0=-9-(L.length-1)*lh/2+4;L.forEach((l,k)=>T(l,0,y0+k*lh,15,'#fff','center'));
- if(st===3){cx.strokeStyle='#ffd0d0';cx.lineWidth=6;cx.beginPath();cx.moveTo(30,-4);cx.lineTo(46,12);cx.moveTo(46,-4);cx.lineTo(30,12);cx.stroke()}
- if(st===2){cx.strokeStyle='#d9ffd9';cx.lineWidth=6;cx.beginPath();cx.moveTo(30,6);cx.lineTo(37,14);cx.lineTo(48,-2);cx.stroke()}
+ const L=a.lines,lh=19,y0=-6-(L.length-1)*lh/2+4;L.forEach((l,k)=>T(l,0,y0+k*lh,16,'#fff','center'));
+ if(st===3){cx.strokeStyle='#ffd0d0';cx.lineWidth=5;cx.beginPath();cx.moveTo(34,29);cx.lineTo(45,40);cx.moveTo(45,29);cx.lineTo(34,40);cx.stroke()}
+ if(st===2){cx.strokeStyle='#d9ffd9';cx.lineWidth=5;cx.beginPath();cx.moveTo(33,34);cx.lineTo(38,39);cx.lineTo(46,28);cx.stroke()}
  cx.restore()}
-function drawBoards(){const g=G,q=g.q;if(!q||(g.phase!=='quiz'&&g.phase!=='res'))return;const R=g.res,yb=lerp(-150,84,back(q.t/.5));
+function drawBoards(){const g=G,q=g.q;if(!q||(g.phase!=='quiz'&&g.phase!=='res')||q.t<0)return;const R=g.res,yb=lerp(-150,84,back(q.t/.5));
  const offs=[0,1,2].map(exitOff),barY=yb-18+Math.max(...offs);
  cx.fillStyle='#39424f';cx.fillRect(0,barY,W,8);cx.fillStyle='#5b6676';cx.fillRect(0,barY,W,3);
  for(let i=0;i<3;i++){const x=CX+(i-1)*LN*PX,y=yb+offs[i];cx.fillStyle='#cfd8e3';cx.fillRect(x-34,barY+8,4,y+6-barY-8);cx.fillRect(x+30,barY+8,4,y+6-barY-8);
   let st=0;if(R){if(i===R.lane)st=R.ok?2:3;else if(!R.ok&&i===q.cl)st=2}else if(i===g.lane)st=1;
   board(i,x,y,st,Math.floor(g.t*6)%2)}}
-function drawTimerBar(){const g=G,q=g.q;if(!q||g.phase!=='quiz')return;const rem=1-qr(q.t,q),x=30,w=330,y=182,h=10,early=rem>.5;
+/* the bottom bar: the FULL text of each answer, one row per lane, in the lane colour; shown while the moment is open */
+function drawAnsBar(){const g=G,q=g.q;if(!q||(g.phase!=='quiz'&&g.phase!=='res')||q.t<0)return;const R=g.res;
+ let gone=0;if(R){if(R.ok)gone=ease((R.t-.35)/.45);else if(R.dt!==undefined)gone=ease(R.dt/.3)}
+ const slide=(1-ease(q.t/.35))*130+gone*130,y0=H-122;
+ for(let i=0;i<3;i++){const an=q.ans[i],y=y0+i*37+slide,mine=R&&i===R.lane;let bg='rgba(8,14,32,.93)',bd=BC[i],fg='#fff';
+  if(R){if(an.ok){bg='#14532d';bd='#6dffa0'}else if(mine){bg='#5b1a1a';bd='#ff6b6b'}else{bg='rgba(8,14,32,.75)';fg='#9fb3c8'}}
+  else if(i===g.lane){bg='rgba(34,46,80,.97)';bd='#ffe45c'}
+  RR(8,y,374,34,9);cx.fillStyle=bg;cx.fill();cx.lineWidth=!R&&i===g.lane?3:2;cx.strokeStyle=bd;cx.stroke();
+  RR(14,y+5,36,24,6);cx.fillStyle=BC[i];cx.fill();cx.fillStyle='#fff';cx.beginPath();const ax=32,ay=y+17;
+  if(i===0){cx.moveTo(ax-7,ay);cx.lineTo(ax+3,ay-7);cx.lineTo(ax+3,ay+7)}else if(i===1){cx.moveTo(ax,ay-7);cx.lineTo(ax+7,ay+4);cx.lineTo(ax-7,ay+4)}else{cx.moveTo(ax+7,ay);cx.lineTo(ax-3,ay-7);cx.lineTo(ax-3,ay+7)}cx.fill();
+  fitT(an.t,58,y+18,316,15,fg,'left')}}
+/* the scene question: alone and large for 1.5 s before the signs land, then a small strip for the rest of the window */
+function drawQ(){const g=G,q=g.q;if(!q||g.phase!=='quiz')return;
+ if(q.t<0){const a=ease((q.t+PRE)/.25),L=wrapT(q.qs,312,24),h=L.length*30+22,y=96-(1-a)*24;cx.save();cx.globalAlpha=a;RR(24,y,342,h,16);cx.fillStyle='rgba(8,14,32,.92)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ffd23f';cx.stroke();
+  L.forEach((l,k)=>T(l,CX,y+26+k*30,24,'#fff','center'));cx.restore()}
+ else{const L=wrapT(q.qs,320,15),h=L.length*20+12;RR(30,252,330,h,10);cx.fillStyle='rgba(8,14,32,.8)';cx.fill();L.forEach((l,k)=>T(l,CX,252+16+k*20,15,'#fff','center'))}}
+function drawTimerBar(){const g=G,q=g.q;if(!q||g.phase!=='quiz'||q.t<0)return;const rem=1-qr(q.t,q),x=30,w=330,y=182,h=10,early=rem>1-FW;
  cx.fillStyle='rgba(0,0,0,.5)';RR(x-2,y-2,w+4,h+4,7);cx.fill();cx.fillStyle=early?'#ffd23f':'#7a8aa5';RR(x,y,Math.max(2,w*rem),h,5);cx.fill();
- cx.fillStyle='#fff';cx.fillRect(x+w*.5-1,y-3,2,h+6);T(g.warp>1?'LOCKED IN - TURBO':early?'TURBO ZONE':'NO BOOST',x+2,y+22,12,early?'#ffd23f':'#cfe0f5','left',3)}
+ cx.fillStyle='#fff';cx.fillRect(x+w*(1-FW)-1,y-3,2,h+6);T(g.warp>1?'LOCKED IN - TURBO':early?'TURBO ZONE':'NO BOOST',x+2,y+22,12,early?'#ffd23f':'#cfe0f5','left',3)}
 const ICON={bus:[14,()=>{cx.translate(.5,0);bus({lights:true,age:G.t})}],'4way':[17,stopSign],cross:[24,()=>{person('#e84393',G.t,1,'#3a2a1a',1.2);rc(-1.4,0,2.8,.12,'#fff')}],
  yellow:[8.6,()=>signal('y',G.t)],amb:[14,()=>ambu(false,G.t)],flag:[18,()=>flagger(false,G.t)],bike:[24,()=>{cx.scale(1.2,1.2);bike(G.t)}],curb:[18,()=>signPole('curb')]};
-function drawTeach(){const g=G;if(g.phase!=='teach')return;const T0=g.pt,D=TEACH_T,rule=RULES[g.cur.rule];
- const y=T0<.4?lerp(-190,70,back(T0/.4)):T0>D-.3?lerp(70,-190,ease((T0-(D-.3))/.3)):70,col=rule.hard?'#ff5d5d':'#ffc928';
- RR(20,y,350,152,16);cx.fillStyle='#10243f';cx.fill();cx.lineWidth=4;cx.strokeStyle=col;cx.stroke();
- cx.save();RR(20,y,350,28,16);cx.clip();cx.fillStyle=col;cx.fillRect(20,y,350,28);cx.restore();
- T(rule.hard?'NEW RULE - MOST ADULTS MISS THIS ONE':'NEW RULE',195,y+14,rule.hard?12.5:15,rule.hard?'#fff':'#10243f','center');
- cx.save();RR(36,y+44,72,72,12);cx.fillStyle='#e8f1fb';cx.fill();cx.clip();const ic=ICON[rule.k];cx.translate(72,y+112);cx.scale(ic[0],ic[0]);ic[1]();cx.restore();
- T(rule.title,122,y+56,22,col,'left');wrapT(rule.teach,232,16).forEach((l,k)=>T(l,122,y+82+k*20,16,'#fff','left'));
- cx.fillStyle=col;cx.fillRect(36,y+139,298*(1-T0/D),4)}
+/* teach card: the rule, a picture, and one "why" line. It stays until a tap (after 0.7 s) or 6 s; the road crawls meanwhile. */
+function drawTeach(){const g=G;if(g.phase!=='teach')return;const T0=g.pt,rule=RULES[g.cur.rule],col=rule.hard?'#ff5d5d':'#ffc928',HC=228;
+ const out=g.td!==undefined?ease(g.td/.3):0,y=T0<.4?lerp(-240,74,back(T0/.4)):lerp(74,-240,out);
+ RR(16,y,358,HC,16);cx.fillStyle='#10243f';cx.fill();cx.lineWidth=4;cx.strokeStyle=col;cx.stroke();
+ cx.save();RR(16,y,358,28,16);cx.clip();cx.fillStyle=col;cx.fillRect(16,y,358,28);cx.restore();
+ T(rule.hard?'NEW RULE - A TRICKY ONE':'NEW RULE',CX,y+14,15,rule.hard?'#fff':'#10243f','center');
+ cx.save();RR(30,y+42,76,76,12);cx.fillStyle='#e8f1fb';cx.fill();cx.clip();const ic=ICON[rule.k];cx.translate(68,y+112);cx.scale(ic[0],ic[0]);ic[1]();cx.restore();
+ T(rule.title,120,y+54,22,col,'left');let tf=17,tl=wrapT(rule.teach,246,tf);if(tl.length>3){tf=15;tl=wrapT(rule.teach,246,tf)}   /* a font that wraps wider than Trebuchet still fits */
+ tl.forEach((l,k)=>T(l,120,y+80+k*(tf+3),tf,'#fff','left'));
+ cx.fillStyle='rgba(255,255,255,.18)';cx.fillRect(30,y+133,330,2);
+ T('WHY',30,y+148,12,'#8fd0ff','left');let wf=16,wl=wrapT(rule.why,290,wf);if(wl.length>2){wf=14;wl=wrapT(rule.why,290,wf)}
+ wl.forEach((l,k)=>T(l,70,y+148+k*(wf+4),wf,'#bfe6ff','left'));
+ cx.globalAlpha=T0>=TEACH_MIN?(.65+.35*Math.sin(g.t*6)):.3;T('TAP TO CONTINUE',CX,y+HC-24,14,'#fff','center');cx.globalAlpha=1;
+ cx.fillStyle=col;cx.fillRect(30,y+HC-12,330*clamp(1-T0/TEACH_MAX,0,1),4)}
 function drawBanners(){const g=G,R=g.res,v=g.verdict;
  if(v){const k=1+.5*Math.exp(-v.t*9);cx.save();cx.translate(CX,370);cx.scale(k,k);cx.globalAlpha=clamp(1.5-v.t,0,1);T(v.s,0,0,v.size,v.col,'center',7);cx.restore()}
- if(R&&!R.ok&&R.t>.35&&R.t<2.45){const rule=RULES[g.q.rule];RR(24,182,342,108,14);cx.fillStyle='rgba(8,14,32,.93)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ffd23f';cx.stroke();
-  T('RULE'+(rule.hard?'  -  MOST ADULTS MISS THIS ONE':''),CX,198,13,rule.hard?'#ff9f6b':'#ffd23f','center');
-  wrapT(rule.teach,310,18).forEach((l,k)=>T(l,CX,226+k*23,18,'#fff','center'))}
+ /* the miss card: stays until a tap */
+ if(R&&!R.ok&&R.card){const rule=RULES[g.q.rule],ra=g.q.ans[g.q.cl].t;let rf=19,ru=wrapT(rule.teach,326,rf),wy=wrapT(rule.why,300,16);if(ru.length>3){rf=17;ru=wrapT(rule.teach,326,rf)}if(wy.length>2)wy=wrapT(rule.why,300,14);
+  const HC=34+ru.length*24+6+wy.length*20+8+24+30,out=R.dt!==undefined?ease(R.dt/.3):0,y=R.cardT<.3?lerp(500,184,ease(R.cardT/.3)):lerp(184,-300,out);
+  RR(14,y,362,HC,16);cx.fillStyle='rgba(8,14,32,.96)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ffd23f';cx.stroke();
+  T('THE RULE'+(rule.hard?'  -  A TRICKY ONE':''),CX,y+18,14,rule.hard?'#ff9f6b':'#ffd23f','center');
+  let yy=y+46;ru.forEach(l=>{T(l,CX,yy,rf,'#fff','center');yy+=24});yy+=2;
+  wy.forEach((l,k)=>T(k?l:'Why: '+l,CX,yy+k*20,16,'#bfe6ff','center'));yy+=wy.length*20+6;
+  fitT('Right: '+ra,CX,yy+8,336,15,'#7dffb0','center');
+  cx.globalAlpha=R.cardT>=.6?(.65+.35*Math.sin(g.t*6)):.3;T('TAP TO CONTINUE',CX,y+HC-16,14,'#fff','center');cx.globalAlpha=1}
+ /* locked in: a right re-ask */
+ if(g.lock){const L=g.lock,a=clamp(2.2-L.tt,0,1),k=ease(L.tt/.25);cx.save();cx.globalAlpha=a;cx.translate(CX,296);cx.scale(.8+.2*k,.8+.2*k);RR(-155,-34,310,68,14);cx.fillStyle='#0f3d26';cx.fill();cx.lineWidth=3;cx.strokeStyle='#35e08a';cx.stroke();
+  T('LOCKED IN',0,-14,22,'#7dffb0','center');fitT(L.t,0,14,290,15,'#fff','center');cx.restore()}
  for(const p of g.pops){cx.save();cx.globalAlpha=clamp(1.3-p.t,0,1);T(p.s,p.x,p.y-p.t*40,p.size,p.col,'center',4);cx.restore()}
  if(g.phase==='finale')T('DMV AHEAD',CX,300,38,'#ffd23f','center',6)}
 function drawSiren(){const g=G,S=g.S,on=(S&&S.kind==='amb'&&g.phase==='quiz'&&S.age>.4)||g.sirenT>0;if(!on)return;
@@ -465,30 +703,36 @@ function drawTitle(){const g=G,p=.5+.5*Math.sin(g.t*4);
  T("Today's route: "+DAY,CX,282,14,'#bfe0ff','center',3);
  cx.save();cx.translate(CX,450);cx.scale(1+.06*p,1+.06*p);T('TAP TO DRIVE',0,0,34,'#fff','center',6);cx.restore();
  T('Swipe left or right to change lane',CX,498,15,'#dbe9f8','center',3);T('Pass: 9 of 12 right, under 3 strikes',CX,524,14,'#dbe9f8','center',3);
+ T('Cards stay until you tap them',CX,550,14,'#dbe9f8','center',3);
+ RR(CALMB.x,CALMB.y,CALMB.w,CALMB.h,14);cx.fillStyle=CALM?'#0e7490':'rgba(5,10,30,.7)';cx.fill();cx.lineWidth=3;cx.strokeStyle=CALM?'#9fe8ff':'rgba(255,255,255,.7)';cx.stroke();
+ T(CALM?'CALM: ON':'CALM: OFF',CX,CALMB.y+CALMB.h/2,22,'#fff','center');T('Calm gives you twice the time to answer',CX,CALMB.y+CALMB.h+22,13,'#dbe9f8','center',3);
 }
 const SQC={g:'#2ecc71',y:'#f1c40f',r:'#e74c3c'};
-function drawEnd(){const g=G,r=g.result,win=r.win,a=ease(g.endT/.35),first=g.missFirst?RULES[g.missFirst.rule]:null;
+/* two layouts: tall (H 820 or more, 390x844) and compact (a phone browser with a toolbar, 390x664 up to 819) */
+const endL=win=>H>=820?{top:50,h:760,hy:112,hs:win?60:46,ry:158,dy:182,sq:198,dot:231,tl:258,tv:288,ts:36,st:326,rr:356,ls:388,l1:562,l2:590,cap:676}
+  :{top:12,h:H-24,hy:54,hs:win?48:38,ry:92,dy:112,sq:126,dot:157,tl:178,tv:204,ts:30,st:232,rr:256,ls:282,l1:452,l2:478,cap:COPY.y+COPY.h+14};
+function drawEnd(){const g=G,r=g.result,win=r.win,a=ease(g.endT/.35),first=g.missFirst?RULES[g.missFirst.rule]:null,rl=ruleLists(),L=endL(win);
  cx.fillStyle='rgba(4,8,22,'+(.8*a)+')';cx.fillRect(0,0,W,H);
  for(const c of g.conf){cx.fillStyle=c.c;cx.fillRect(c.x,c.y,c.w,c.w*.6)}
  cx.save();cx.translate(0,(1-a)*40);cx.globalAlpha=a;
- RR(18,50,354,760,22);cx.fillStyle='#0f1b33';cx.fill();cx.lineWidth=4;cx.strokeStyle=win?'#35e08a':'#ff4d4d';cx.stroke();
- cx.save();cx.translate(CX,112);cx.rotate(-.07);T(win?'PASSED':'SUSPENDED',0,0,win?60:46,win?'#35e08a':'#ff4d4d','center',6);cx.restore();
- T(win?'You reached the DMV.':r.why==='strikes'?'3 strikes. Your license is suspended.':'Only '+g.right+' of 12 right. You need 9.',CX,158,15,'#fff','center');
- T('DAILY ROUTE '+DAY,CX,182,12,'#8fa8c8','center');
- for(let i=0;i<12;i++){const x=41+i*26,c=g.log[i],hard=ROUTE[i]&&RULES[ROUTE[i].rule].hard;cx.fillStyle=SQC[c]||'#3b4560';RR(x,198,22,22,4);cx.fill();
-  if(hard){cx.fillStyle='#fff';cx.beginPath();cx.arc(x+11,231,3,0,6.3);cx.fill()}}
- T('TIME',105,258,11,'#8fa8c8');T(fmtT(g.runT),105,288,36,'#fff','center');T('SCORE',285,258,11,'#8fa8c8');T(String(g.score),285,288,36,'#ffd23f','center');
- T('RIGHT '+g.right+'/'+g.done+'     BEST STREAK '+g.bestStreak+'     STRIKES '+g.strikes,CX,326,13,'#c7d6e6','center');
- RR(34,348,322,170,14);cx.fillStyle='#1b2a4a';cx.fill();
- if(first){let y=374;wrapT(roastOf(g.missFirst),290,21).forEach(l=>{T(l,CX,y,21,'#ffd23f','center');y+=26});
-  if(first.hard){T('Most adults miss this one.',CX,y+4,15,'#ff9f6b','center');y+=26}
-  y+=4;wrapT('RULE: '+first.teach,290,13).forEach(l=>{T(l,CX,y,13,'#c7d6e6','center');y+=17})}
- else{T('Clean run.',CX,400,26,'#7dffb0','center');T('Nothing to roast. Beat your time.',CX,438,15,'#c7d6e6','center')}
- [['g','fast + right',44],['y','slow + right',150],['r','wrong',262]].forEach(([c,s,x])=>{cx.fillStyle=SQC[c];RR(x,540,14,14,3);cx.fill();T(s,x+20,548,13,'#c7d6e6','left')});
- cx.fillStyle='#fff';cx.beginPath();cx.arc(51,574,3,0,6.3);cx.fill();T('= most adults miss this one',62,574,13,'#c7d6e6','left');
+ RR(18,L.top,354,L.h,22);cx.fillStyle='#0f1b33';cx.fill();cx.lineWidth=4;cx.strokeStyle=win?'#35e08a':'#ff4d4d';cx.stroke();
+ cx.save();cx.translate(CX,L.hy);cx.rotate(-.07);T(win?'PASSED':'SUSPENDED',0,0,L.hs,win?'#35e08a':'#ff4d4d','center',6);cx.restore();
+ T(win?'You reached the DMV.':r.why==='strikes'?'3 strikes. Your license is suspended.':'Only '+g.right+' of 12 right. You need 9.',CX,L.ry,15,'#fff','center');
+ T('DAILY ROUTE '+DAY+(g.calm?'   CALM RUN':''),CX,L.dy,12,g.calm?'#9fe8ff':'#8fa8c8','center');
+ for(let i=0;i<12;i++){const x=41+i*26,c=g.log[i],hard=ROUTE[i]&&RULES[ROUTE[i].rule].hard;cx.fillStyle=SQC[c]||'#3b4560';RR(x,L.sq,22,22,4);cx.fill();
+  if(hard){cx.fillStyle='#fff';cx.beginPath();cx.arc(x+11,L.dot,3,0,6.3);cx.fill()}}
+ T('TIME',105,L.tl,11,'#8fa8c8');T(fmtT(g.runT),105,L.tv,L.ts,'#fff','center');T('SCORE',285,L.tl,11,'#8fa8c8');T(String(g.score),285,L.tv,L.ts,'#ffd23f','center');
+ T('RIGHT '+g.right+'/'+g.done+'     BEST STREAK '+g.bestStreak+'     STRIKES '+g.strikes,CX,L.st,13,'#c7d6e6','center');
+ if(first)fitT(roastOf(g.missFirst),CX,L.rr,330,16,'#ffd23f','center');else T('Clean run. Nothing to roast.',CX,L.rr,18,'#7dffb0','center');
+ let y=L.ls;
+ const sect=(title,col,arr)=>{if(!arr.length)return;T(title,CX,y,14,col,'center');y+=21;arr.forEach(k=>{fitT(RULES[k].short,CX,y,326,14,'#fff','center');y+=19});y+=9};
+ sect('RULES YOU LEARNED TODAY','#7dffb0',rl.mastered);sect('RULES TO PRACTISE','#ff9f6b',rl.practise);
+ if(!rl.mastered.length&&!rl.practise.length)T('No rule was asked twice yet.',CX,y+4,14,'#c7d6e6','center');
+ [['g','fast + right',44],['y','slow + right',150],['r','wrong',262]].forEach(([c,s,x])=>{cx.fillStyle=SQC[c];RR(x,L.l1,14,14,3);cx.fill();T(s,x+20,L.l1+8,13,'#c7d6e6','left')});
+ cx.fillStyle='#fff';cx.beginPath();cx.arc(51,L.l2,3,0,6.3);cx.fill();T('= a tricky rule',62,L.l2,13,'#c7d6e6','left');
  RR(COPY.x,COPY.y,COPY.w,COPY.h,14);cx.fillStyle=g.copied>0?'#16a34a':g.copied<0?'#b91c1c':'#2f80ed';cx.fill();
  T(g.copied>0?'COPIED!':g.copied<0?'COPY FAILED':'COPY RESULT',CX,COPY.y+COPY.h/2,22,'#fff','center');
- T('Copies the squares, time and link',CX,676,13,'#a9bfdc','center');
+ T('Copies the squares, time and link',CX,L.cap,13,'#a9bfdc','center');
  const p=1+.03*Math.sin(g.endT*5);cx.save();cx.translate(CX,RUN.y+RUN.h/2);cx.scale(p,p);RR(-RUN.w/2,-RUN.h/2,RUN.w,RUN.h,18);cx.fillStyle='#ffd23f';cx.fill();
  T('TAP TO RUN AGAIN',0,0,24,'#10243f','center');cx.restore();
  cx.restore()}
@@ -498,7 +742,7 @@ function draw(al){const g=G,rd=g.dist,rx=g.carX;
  if(al>=0&&al<=1){g.dist=lerp(g.pd,rd,al);g.carX=lerp(g.px,rx,al)}  /* render interpolation (Fiedler): smooth on 90 and 120 Hz screens */
  cx.save();cx.clearRect(0,0,W,H);
  const sh=g.shake;cx.translate((Math.random()-.5)*sh*16,(Math.random()-.5)*sh*16);
- const zf=1+clamp((g.v*g.warp-27)/40,0,.12)*.5;cx.translate(CX,520);cx.scale(zf,zf);cx.translate(-CX,-520);
+ const zf=1+clamp((g.v*g.warp-27)/40,0,.12)*.5,zy=GY-180;cx.translate(CX,zy);cx.scale(zf,zf);cx.translate(-CX,-zy);
  drawWorld();drawBuildings();drawFurniture();
  const d=g.dist,dl=[];if(g.S)dl.push({z:g.S.az-d,f:()=>drawScene(g.S)});
  for(const o of g.objs)dl.push({z:o.wz-d,f:()=>drawObj(o)});
@@ -508,17 +752,26 @@ function draw(al){const g=G,rd=g.dist,rx=g.carX;
  drawSpeedLines();cx.restore();
  drawSiren();
  if(g.flash){cx.fillStyle=g.flash.col;cx.globalAlpha=clamp(g.flash.a,0,1)*.7;cx.fillRect(0,0,W,H);cx.globalAlpha=1}
- drawMirror();drawHUD();drawBoards();drawTimerBar();drawTeach();drawBanners();
+ drawMirror();drawHUD();drawBoards();drawAnsBar();drawQ();drawTimerBar();drawTeach();drawBanners();
  if(g.mode==='title')drawTitle();else if(g.mode==='end')drawEnd();
+ drawMute();
  g.dist=rd;g.carX=rx}
-G=blank('title');
+resize();G=blank('title');
 let lastTs=0,acc=0;
 function frame(ts){requestAnimationFrame(frame);const dt=Math.min(.1,Math.max(0,(ts-lastTs)/1000));lastTs=ts;acc+=dt*TS;
  let n=0;const mx=8+Math.ceil(6*TS);while(acc>=DT&&n<mx){step();acc-=DT;n++}if(n>=mx)acc=0;draw(acc/DT)}
 requestAnimationFrame(frame);
-if(DEV)window.__rush={get G(){return G},get route(){return ROUTE},seed:SEED,day:DAY,rules:RULES,start(route){startRun();if(route)ROUTE=route},
+/* test hooks (?dev=1 only) */
+async function renderOffline(kind,opt){opt=opt||{};const sec=opt.sec||8,sr=44100,oc=new OfflineAudioContext(2,Math.round(sr*sec),sr),E=makeEngine(oc,false);
+ if(kind==='music'){E.layer=opt.layer||0;E.low=!!opt.low;E.start(.05);E.pump(sec)}else SFX[kind](E,.05,opt.a,opt.b);
+ const buf=await oc.startRendering(),x=buf.getChannelData(0);let pk=0,e=0,d=0,d2=0,lastIdx=0;
+ for(let i=0;i<x.length;i++){const v=x[i];pk=Math.max(pk,Math.abs(v));e+=v*v;if(i)d+=(v-x[i-1])*(v-x[i-1]);if(i>1){const s2=v-2*x[i-1]+x[i-2];d2+=s2*s2}if(Math.abs(v)>.002)lastIdx=i}
+ return{peak:+pk.toFixed(3),rms:+Math.sqrt(e/x.length).toFixed(4),hf:+(d/Math.max(e,1e-12)).toFixed(5),hf2:+(d2/Math.max(e,1e-12)).toFixed(5),soundSec:+(lastIdx/sr).toFixed(2),nan:x.some(v=>v!==v)}}
+if(DEV)window.__rush={get G(){return G},get route(){return ROUTE},seed:SEED,day:DAY,rules:RULES,start(route){startRun();if(route)ROUTE=route},renderOffline,lists:ruleLists,get H(){return H},COPY,RUN,CALMB,endL,
+ audio:{state:()=>AC?AC.state:'none',muted:()=>MUTED,calm:()=>CALM,layer:()=>AE?AE.layer:-1,low:()=>AE?AE.low:null,musicOn:()=>AE?AE.on:false},
  peek(){const g=G,q=g.q;return{mode:g.mode,phase:g.phase,mi:g.mi,lane:g.lane,correct:q?q.cl:null,qt:q?q.t:0,W:q?q.W:0,rule:q?RULES[q.rule].k:(g.cur?RULES[g.cur.rule].k:null),
-  runT:g.runT,score:g.score,strikes:g.strikes,right:g.right,done:g.done,log:g.log.slice(),streak:g.streak,result:g.result}}};
+  runT:g.runT,score:g.score,strikes:g.strikes,right:g.right,done:g.done,log:g.log.slice(),streak:g.streak,result:g.result,pt:g.pt,td:g.td,calm:g.calm,
+  card:!!(g.res&&g.res.card&&g.res.dt===undefined),cardT:g.res?g.res.cardT:0,lock:!!g.lock}}};
 </script>
 </body>
 </html>

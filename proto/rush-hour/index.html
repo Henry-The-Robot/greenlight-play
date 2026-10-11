@@ -48,10 +48,10 @@ addEventListener('resize',resize);
 /* ---------- projection and drawing helpers ---------- */
 const gg=z=>Z1/(Z1+z),sc=z=>SF+(1-SF)*gg(z),yy=z=>HOR+(GY-HOR)*gg(z);
 function gq(x1,x2,za,zb,col){za=Math.max(za,ZN);if(zb<=za)return;const sa=sc(za),sb=sc(zb),ya=yy(za),yb=yy(zb);
- cx.fillStyle=col;cx.beginPath();cx.moveTo(CX+x1*PX*sa,ya);cx.lineTo(CX+x2*PX*sa,ya);cx.lineTo(CX+x2*PX*sb,yb);cx.lineTo(CX+x1*PX*sb,yb);cx.fill()}
-function sideQuad(xm,za,zb,h0,h1,col){const sa=sc(za),sb=sc(zb),ya=yy(za),yb=yy(zb),xa=CX+xm*PX*sa,xb=CX+xm*PX*sb;
+ cx.fillStyle=col;cx.beginPath();cx.moveTo(CX+x1*PX*sa+BO(za),ya);cx.lineTo(CX+x2*PX*sa+BO(za),ya);cx.lineTo(CX+x2*PX*sb+BO(zb),yb);cx.lineTo(CX+x1*PX*sb+BO(zb),yb);cx.fill()}
+function sideQuad(xm,za,zb,h0,h1,col){const sa=sc(za),sb=sc(zb),ya=yy(za),yb=yy(zb),xa=CX+xm*PX*sa+BO(za),xb=CX+xm*PX*sb+BO(zb);
  cx.fillStyle=col;cx.beginPath();cx.moveTo(xa,ya-h0*PX*sa);cx.lineTo(xb,yb-h0*PX*sb);cx.lineTo(xb,yb-h1*PX*sb);cx.lineTo(xa,ya-h1*PX*sa);cx.fill()}
-function at(x,z,fn,a,rot){if(z<ZN+.5)return;const k=PX*sc(z);cx.save();cx.translate(CX+x*k,yy(z));cx.scale(k,k);
+function at(x,z,fn,a,rot){if(z<ZN+.5)return;const k=PX*sc(z);cx.save();cx.translate(CX+x*k+BO(z),yy(z));cx.scale(k,k);
  if(a!==undefined&&a<1)cx.globalAlpha=Math.max(0,a);if(rot)cx.rotate(rot);fn();cx.restore()}
 const at0=at;
 /* meter-space shapes: origin ground centre, y up */
@@ -185,7 +185,7 @@ function drawBuildings(){const BLK=20,d=G.dist,i0=Math.floor((d-10)/BLK),i1=Math
   if(a>G.endZ||gapHit(a,b))continue;
   const z1=Math.max(a-d,-8),z2=b-d;if(z2<-7)continue;
   const Hh=9+h1*24,xs=sd*(8.7+h2*2),bw=sd*12,pal=BP[(h3*8)|0],s1=sc(z1),y1=yy(z1);
-  if(a-d>-7){cx.fillStyle=pal[1];const xa=CX+xs*PX*s1,xb=CX+(xs+bw)*PX*s1;cx.fillRect(Math.min(xa,xb),y1-Hh*PX*s1,Math.abs(xb-xa),Hh*PX*s1)}
+  if(a-d>-7){cx.fillStyle=pal[1];const xa=CX+xs*PX*s1+BO(z1),xb=CX+(xs+bw)*PX*s1+BO(z1);cx.fillRect(Math.min(xa,xb),y1-Hh*PX*s1,Math.abs(xb-xa),Hh*PX*s1)}
   sideQuad(xs,z1,z2,0,Hh,pal[0]);
   if(z1<120){for(let r=0,h=2.8;h+1.8<Hh;r++,h+=3.4)sideQ(xs,0,0,h,hash(i*17+r*3+sd)>.5?'#fff2b0':'#6f8db3',z1,z2);
    sideQuad(xs,z1+.8,z2-.8,.2,2.4,'#34495e');sideQuad(xs,z1+.8,z2-.8,2.4,2.9,['#e74c3c','#27ae60','#2980b9','#f39c12'][(h2*4)|0])}}}
@@ -238,6 +238,8 @@ const C_OK=25,C_TICKET=-150,C_CRASH=-100,C_REROUTE=-20,C_QOK=30,C_QBAD=-60,AD_SE
 const lvSpeed=s=>s<=3?[0,11,14,17][s]:Math.min(22,17+1.5*(s-3));
 const lvSP=s=>[0,66,72,58][Math.min(s,3)];
 const lvGap=s=>[0,3,1.9,.3][Math.min(s,3)];
+/* Road bend for the turn animation: the helpers gq, sideQuad, at and the building front add BO(z) pixels to the x of everything at depth z (splice5.py patches them). */
+let BEND=0;const BO=z=>{if(!BEND)return 0;z=Math.max(0,z);return BEND*300*Math.pow(z/(Z1+z),1.7)};   /* px: 0 at the car, about 255 px at the horizon when BEND is .85 */
 const CURBC={red:'#d62d20',white:'#f7f7f7',yellow:'#f2c200',green:'#2ea043',blue:'#1f6fe0'};
 const CARCOL=['#e63946','#2a9d8f','#f4a261','#6c5ce7','#00b4d8','#8d99ae','#e9c46a'];
 const LINK=location.protocol==='file:'?'https://henry-the-robot.github.io/greenlight-play/proto/rush-hour/':location.origin+location.pathname;
@@ -328,7 +330,7 @@ function fmtT(t){const n=Math.floor(t*10+1e-6),m=Math.floor(n/600),s=(n%600)/10;
 const pop=(s,x,y,col,size)=>G.pops.push({s,x,y,col,size:size||22,t:0});
 const verdict=(s,col,size)=>{G.verdict={s,col,size:size||56,t:0}};
 const flash=(col,a)=>{G.flash={col,a}};
-const addCoins=n=>{const g=G;g.coins+=n};   /* score only (Kyle): the total can go below zero, so a ticket always costs the full 150 (critic round 1) */
+const addCoins=n=>{const g=G,b=g.coins;g.coins=Math.max(0,b+n);return g.coins-b};   /* score only (Kyle 10-11): coins never go below 0; a ticket or crash takes what is there. Returns the change. */
 const addGap=(a,b)=>{G.gaps.push([a,b]);G.gaps=G.gaps.filter(x=>x[1]>G.dist-80)};
 const cueGo=()=>{G.cue={t:0};snd('go')};
 function cruiseNow(){const g=G;return lvSpeed(g.stage)*(.6+.4*clamp(g.stT/9,0,1))}
@@ -338,17 +340,17 @@ function buildQueue(s){const un=x=>!PROG.passed[x.id];
  const own=s<=3?SIT.filter(x=>x.st===s&&un(x)):[];for(let i=own.length-1;i>0;i--){const j=Math.floor(QRND()*(i+1));[own[i],own[j]]=[own[j],own[i]]}   /* fixed stages, shuffled inside a stage (Kyle 10-11) */
  const carry=SIT.filter(x=>(s>3||x.st<s)&&un(x));return own.concat(carry).map(x=>x.id)}
 function startRun(){if(PROG.wins&&nPassed()===NSIT)PROG=Object.assign(freshProg(),{wins:PROG.wins,best:PROG.best});
- G=blank('run');const g=G;PROG.runs++;g.coins=PROG.coins||0;g.cpCoins=g.coins;g.v=7;lowMusic(false);if(AE)AE.layer=0;musicOn();
+ G=blank('run');const g=G;PROG.runs++;g.coins=Math.max(0,PROG.coins||0);g.cpCoins=g.coins;g.v=7;lowMusic(false);if(AE)AE.layer=0;musicOn();
  startStage(PROG.stage||1,true,false)}
 function startStage(s,first,restore){const g=G;
  for(let k=0;k<6;k++){g.queue=buildQueue(s);if(g.queue.length||nPassed()===NSIT)break;s++}
  if(nPassed()===NSIT&&!g.queue.length){winGame();return}
- g.stage=s;g.stT=0;g.scenes=[];g.gaps=[];g.S=null;g.cur=null;g.pend=null;g.cc=null;g.tk=null;g.tn=null;g.measure=null;g.toast=null;g.cue=null;g.route=null;g.cruise=cruiseNow();
+ g.stage=s;g.stT=0;g.scenes=[];g.gaps=[];g.S=null;g.cur=null;g.pend=null;g.cc=null;g.tk=null;g.tn=null;BEND=0;g.measure=null;g.toast=null;g.cue=null;g.route=null;g.cruise=cruiseNow();
  g.phase='drive';g.pt=0;g.gapT=first?1.6:restore?2.2:1.8;g.idleT=0;g.honked=false;
  if(restore)g.banner={t:0,l1:s>1?'CHECKPOINT '+(s-1):'BACK AT THE START',l2:'Passed situations stay passed',l3:g.queue.length+' to go in this stage'};
  else g.banner={t:0,l1:first?'GO!':'STAGE '+s,l2:s>1?'A faster road':'Slow and simple',l3:'Situations: '+nPassed()+' / '+NSIT};
  if(!first&&!restore)snd('tick')}
-function restoreCp(){const g=G;g.coins=Math.min(g.coins,g.cpCoins+C_CRASH);g.v=0;   /* coins earned since the checkpoint are lost; coins lost to tickets stay lost */g.streak=0;g.xo=null;g.lane=1;g.yaw=0;startStage(g.stage,false,true)}
+function restoreCp(){const g=G;g.coins=Math.max(0,Math.min(g.coins,g.cpCoins+C_CRASH));g.v=0;   /* coins earned since the checkpoint are lost; coins lost to tickets stay lost */g.streak=0;g.xo=null;g.lane=1;g.yaw=0;startStage(g.stage,false,true)}
 /* ---------- spawning a situation and its parts ---------- */
 function nextSit(){const g=G;if(!g.queue.length){reachCheckpoint();return}
  const sit=SITBY[g.queue.shift()];g.cur={sit,pi:0};g.sitN++;g.starts.push({id:sit.id,t:+g.runT.toFixed(2),stage:g.stage,p:sit.parts.length});spawnPart(0)}
@@ -360,9 +362,9 @@ function spawnPart(i){const g=G,sit=g.cur.sit,p=sit.parts[i];
 function advance(){const g=G,c=g.cur;if(c.pi+1<c.sit.parts.length){spawnPart(c.pi+1);return}passSit()}
 function passSit(){const g=G,sit=g.cur.sit;PROG.passed[sit.id]=1;saveProg();g.passedRun++;g.streak++;addCoins(C_OK);g.log.push('g');
  pop('+'+C_OK,CX,GY-150,'#7dffb0',34);pop(sit.n,CX,GY-112,'#bfe6ff',17);snd('right');[0,1,2].forEach(i=>snd('coin',i,0,.1+i*.07));g.popS=1;
- g.cur=null;g.phase='drive';g.gapT=lvGap(g.stage)+(sit.parts.some(p=>p.k==='turn')?2.5:0);if(AE)AE.setLayer(layerNow());
+ g.cur=null;g.phase='drive';g.gapT=lvGap(g.stage)+(sit.parts.some(p=>p.k==='turn')?2.85:0)   /* a turn leaves a calm street; +.35 s since the turn animation is .35 s shorter (road share) */;if(AE)AE.setLayer(layerNow());
  if(nPassed()===NSIT)winGame()}
-function missSit(msg,coins){const g=G;g.log.push('y');if(coins){addCoins(coins);g.reroutes++;snd('coinloss');pop(coins+' coins',CX,GY-150,'#ff6b6b',26)}
+function missSit(msg,coins){const g=G;g.log.push('y');if(coins){const d=addCoins(coins);g.reroutes++;if(d<0){snd('coinloss');pop(d+' coins',CX,GY-150,'#ff6b6b',26)}}
  g.toast={t:0,head:'NOT PASSED',txt:msg};g.cur=null;g.phase='drive';g.gapT=lvGap(g.stage);g.pend=null}
 /* ---------- violations (a ticket) and crashes ---------- */
 function devLog(kind,o){if(DEV)(window.__vioLog=window.__vioLog||[]).push({kind,title:o.title,what:o.what,rule:o.rule})}
@@ -374,16 +376,16 @@ function startTicket(){const g=G,S=g.pend;g.pend=null;g.phase='ticket';g.tickets
 function stepTicket(){const g=G,k=g.tk;let vT=0;k.t+=DT;g.dec=7;
  if(k.st===0){g.xo=3.9;if(Math.floor(k.t/.9)!==Math.floor((k.t-DT)/.9))snd('siren');if(k.t>=1.2&&g.v<.3){k.st=1;k.t1=0;g.xo=null}}
  else if(k.st===1){g.dec=30;k.t1+=DT;if(k.t1>=1.0){k.st=2;k.ct=0;lowMusic(true);snd('card')}}
- else if(k.st===2){g.dec=30;k.ct+=DT;if(k.dt!==undefined){k.dt+=DT;if(k.dt>=.25){k.st=3;k.t3=0;lowMusic(false);k.left=k.fine;snd('stamp')}}}
+ else if(k.st===2){g.dec=30;k.ct+=DT;if(k.dt!==undefined){k.dt+=DT;if(k.dt>=.25){k.st=3;k.t3=0;lowMusic(false);k.take=Math.min(k.fine,Math.max(0,g.coins));k.left=k.take;snd('stamp')}}}
  else if(k.st===3){g.dec=30;k.t3+=DT;
-  if(k.t3>.35){const step=Math.min(k.left,k.fine*DT/1.6);k.left-=step;k.paid+=step;g.coins-=step;if(Math.floor(k.paid/10)!==Math.floor((k.paid-step)/10))snd('coin',Math.floor(k.paid/10)%8)}
+  if(k.t3>.35){const step=Math.min(k.left,k.fine*DT/1.6);k.left-=step;k.paid+=step;g.coins=Math.max(0,g.coins-step);if(Math.floor(k.paid/10)!==Math.floor((k.paid-step)/10))snd('coin',Math.floor(k.paid/10)%8)}
   if(k.left<=0&&k.t3>2.2){g.sirenT=0;g.tk=null;g.phase='drive';g.gapT=1.6;g.cur=null;g.cue=null;g.lane=2;g.toast=null;verdict('PAID','#ffd23f',40)}}
  return vT}
 function tapTicket(){const k=G.tk;if(k&&k.st===2&&k.dt===undefined&&k.ct>=.7){k.dt=0;snd('tick')}}
 function crashNow(S,o){const g=G;if(g.phase==='crash'||g.mode!=='run')return;
- devLog('crash:'+o.kind,o);g.lastO=o;S.out='crash';g.pend=null;g.crashes++;g.lives--;addCoins(C_CRASH);g.streak=0;g.log.push('r');g.lastCrashSit=g.cur?g.cur.sit.id:null;
+ devLog('crash:'+o.kind,o);g.lastO=o;S.out='crash';g.pend=null;g.crashes++;g.lives--;const lost=-addCoins(C_CRASH);g.streak=0;g.log.push('r');g.lastCrashSit=g.cur?g.cur.sit.id:null;
  g.cc={t:0,o,no:caseNo('CR'),card:false,ct:0,dt:undefined,near:o.kind==='near',final:g.lives<=0};g.phase='crash';g.measure=null;g.toast=null;g.xo=null;g.sirenT=0;
- pop(C_CRASH+' coins',CX,GY-230,'#ff6b6b',28);
+ g.cc.lost=lost;if(lost>0)pop('-'+lost+' coins',CX,GY-230,'#ff6b6b',28);
  if(o.kind==='near'){snd('screech');verdict('NEAR MISS!','#ffd23f',54);g.shake=.7;flash('#ffd23f',.25)}
  else{snd('crash');snd('life',0,0,.3);verdict('CRASH!','#ff4d4d',64);g.shake=1.5;flash('#ffffff',.85);g.v=o.kind==='behind'?4:-2.2;g.spin=.5;
   const ix=CX+g.carX*PX,iy=GY-(o.kind==='behind'?20:70);for(let i=0;i<46;i++){const a=rnd()*6.283,s=60+rnd()*260;g.sparks.push({x:ix,y:iy,vx:Math.cos(a)*s,vy:Math.sin(a)*s-80,t:0,c:['#ffd23f','#ff8c1a','#fff','#ff5d3a'][(rnd()*4)|0],w:2+rnd()*4})}
@@ -542,19 +544,7 @@ K.bike={init(S){S.bl=G.lane;S.vz=4.5;S.az0=G.dist+54;S.az=S.az0;S.minDx=99;S.slo
  ground(S,d){},
  props(S,dl){const g=G,z=S.az-g.dist;P(dl,S.bx,z,()=>{cx.scale(1.3,1.3);bike(S.age)},1,0,1.4);
   if(!S.leave&&z>0&&z<30&&Math.abs(g.carX-S.bx)<2.2)P(dl,S.bx,z,()=>{cx.font='bold 0.9px '+FONT;cx.textAlign='center';cx.fillStyle='#ff9f6b';cx.fillText('!',0,-3.2)},1,0,1.4)}};
-/* CURB ZONES: pull over at the curb (right lane) and stop 1 s in a zone you may use. A zone you may not use = ticket. Passing all zones = not passed. */
-const CURBV={A:{task:'Drop off your passenger: stop at the curb',z:[['red',0],['white',1]]},B:{task:'Park for a quick errand: stop at the curb',z:[['blue',0],['green',1]]},C:{task:'Drop off your passenger: stop at the curb',z:[['red',0],['yellow',1],['white',1]]}};
-const CURB_RULE={red:RULE.red_c,white:RULE.white_c,yellow:RULE.yellow_c,green:RULE.green_c,blue:RULE.blue_c};
-const CURB_VIO={red:'STOPPED AT A RED CURB',blue:'PARKED AT A BLUE CURB',white:'STOPPED AT A WHITE CURB',yellow:'STOPPED AT A YELLOW CURB',green:'STOPPED AT A GREEN CURB'};
-K.curb={init(S){const cv=CURBV[S.v];S.task=cv.task;S.zones=cv.z.map((z,i)=>({c:z[0],ok:z[1],z0:S.az+i*20,z1:S.az+i*20+14,t:0}));S.zend=S.zones[S.zones.length-1].z1;S.endZ=S.zend+6;S.pullOk=()=>true},
- step(S){const g=G,zc=g.dist+2.2;
-  if(!S.on&&S.az-g.dist<=110)S.on=true;
-  S.legit=S.on&&g.dist<S.zend+4;
-  if(g.v<.3&&g.carX>2.2&&!S.out){for(const zn of S.zones){if(zc>=zn.z0&&zc<=zn.z1){zn.t+=DT;
-     if(zn.t>=1.0){if(zn.ok){S.out='ok';cueGo()}else violate(S,{title:CURB_VIO[zn.c],what:'You stopped at a '+zn.c+' curb where you may not.',rule:CURB_RULE[zn.c]})}}}}
-  if(g.dist>S.endZ&&!S.out)S.out='miss'},
- ground(S,d){for(const zn of S.zones)gq(4.9,6.3,zn.z0-d,zn.z1-d,CURBC[zn.c])},
- props(S,dl){const z=S.az-G.dist;for(const zn of S.zones){P(dl,6.4,zn.z0-G.dist-1,()=>signPole(zn.c),1);}}};
+/* Curb-colour zones are not on the road (Kyle 10-11): they belong to the rapid-fire round at checkpoints (card RH5r). */
 /* FIRE HYDRANT: pull into the curb lane and stop with the car's front 15 to 25 ft before the hydrant. Six identical ticks on the curb (5 to 30 ft); nothing marks the right stop. */
 const HY_MIN=15,HY_MAX=25,HY_ZONE=48,PARK_V=5.2,HY_TICKS=[5,10,15,20,25,30];
 K.hydrant={init(S){S.hy=1;S.stopT=0;S.judged=false;S.laneT=0;S.ft=99;S.meas=null;S.endZ=S.az+10;S.zend=S.az;S.task='Park at the curb';S.ciRule=RULE.hyd;S.pullOk=()=>true},
@@ -643,11 +633,17 @@ function execTurn(S){const g=G;S.exec=true;g.route=null;let vio=null,crash=null;
   if(S.o&&S.o.go&&!S.o.pass&&Math.abs(S.o.x-g.carX)<7)crash={kind:'hit',title:'DROVE INTO CROSS TRAFFIC',what:'You turned right on red into a car that had the green.',rule:RULE.rtor}}
  if(crash){S.exec=false;S.q=0;S.crashed=true;if(S.o)S.o.x=g.carX-3.2;crashNow(S,crash);return}
  if(vio){S.out='ticket';S.vio=vio;g.pend=S}
- g.phase='turn';g.tn={t:0,dir:S.dir,snap:false,needSnap:true,jumped:false,S};snd('swipe')}
-function stepTurn(){const g=G,n=g.tn;n.t+=DT;const T_=1.5;
- if(n.snap&&!n.jumped){n.jumped=true;g.dist+=4000;g.pd=g.dist;g.scenes=[];g.gaps=[];g.xo=null;g.carX=0;g.lane=n.dir>0?2:0;g.carX=(g.lane-1)*LN}
- g.yaw=n.dir*.35*Math.sin(clamp(n.t/T_,0,1)*Math.PI)*(n.t<T_*.5?1:.8);
- if(n.t>=T_){g.yaw=0;const S=n.S;g.tn=null;g.phase='sit';if(!S.out){S.out='ok'}}
+ g.phase='turn';g.tn={t:0,dir:S.dir,jumped:false,S};snd('swipe')}
+/* The turn (1.15 s, fix pass 10-11): the road ahead bends to the turn side (BEND, a lateral shift that grows with the square of the distance, as in the
+   curved-road pseudo-3D of Jake Gordon's javascript-racer), so the buildings and trees swing across; the car yaws into the curve. At 0.5 s the world jumps to a new
+   street (+4000 m) behind a dark fade; the new street starts bent and straightens while the fade clears. */
+const TURN_J=.5,TURN_T=1.15,TURN_B=.85,smooth=u=>{u=clamp(u,0,1);return u*u*(3-2*u)};
+function turnBend(n){return n.t<TURN_J?smooth(n.t/TURN_J):1-smooth((n.t-TURN_J)/(TURN_T-TURN_J))}
+function turnFade(n){return .92*(n.t<TURN_J?clamp((n.t-(TURN_J-.14))/.14,0,1):1-clamp((n.t-TURN_J)/.4,0,1))}
+function stepTurn(){const g=G,n=g.tn;n.t+=DT;
+ if(!n.jumped&&n.t>=TURN_J){n.jumped=true;g.dist+=4000;g.pd=g.dist;g.scenes=[];g.gaps=[];g.xo=null;g.lane=n.dir>0?2:0;g.carX=(g.lane-1)*LN}
+ const b=turnBend(n);BEND=n.dir*TURN_B*b;g.yaw=n.dir*.45*b;
+ if(n.t>=TURN_T){g.yaw=0;BEND=0;const S=n.S;g.tn=null;g.phase='sit';if(!S.out){S.out='ok'}}
  return Math.min(g.cruise,8)}
 function onSwipe(dir){const g=G;if(g.mode!=='run')return;const S=g.S;
  if(g.phase==='sit'&&S&&S.k==='turn'&&!S.exec&&(dir==='right'?1:dir==='left'?-1:0)===S.dir&&!S.q){S.q=1;snd('swipe')}}
@@ -662,7 +658,7 @@ function pickCQ(){const g=G,out=[],tops={};const pool=CQ.filter(q=>!g.usedQ[q.id
 function startCQ(){const g=G;g.cp.st=1;const qs=pickCQ();g.cq={i:0,qs,sel:-1,res:null,t:0,card:false,ct:0,dt:undefined,lay:null,right:0};lowMusic(false)}
 function answerCQ(i){const g=G,c=g.cq;if(!c||c.res!==null||c.t<.25)return;const q=c.qs[c.i];c.sel=i;const ok=i===q.ci;c.res=ok?'right':'wrong';c.t=0;PROG.missed=PROG.missed||{};if(ok)delete PROG.missed[q.f];else PROG.missed[q.f]=1;saveProg();
  if(ok){c.right++;g.qRight++;addCoins(C_QOK);snd('right');pop('+'+C_QOK,CX,300,'#ffd23f',28)}
- else{g.qWrong++;addCoins(C_QBAD);snd('strike');snd('coinloss',0,0,.2);pop(C_QBAD+' coins',CX,300,'#ff6b6b',28);g.shake=.4;lowMusic(true)}}
+ else{g.qWrong++;const dq=addCoins(C_QBAD);snd('strike');if(dq<0){snd('coinloss',0,0,.2);pop(dq+' coins',CX,300,'#ff6b6b',28)}g.shake=.4;lowMusic(true)}}
 function nextCQ(){const g=G,c=g.cq;lowMusic(false);c.i++;if(c.i>=c.qs.length){g.cq=null;startAd('cp');return}c.sel=-1;c.res=null;c.t=0;c.lay=null}
 function stepCQ(){const g=G,c=g.cq;c.t+=DT;if(c.res==='right'&&c.t>=.5)nextCQ()}
 function tapCQ(x,y){const g=G,c=g.cq;if(!c)return;if(c.res==='wrong'){if(c.t>=.8)nextCQ();return}if(c.res!==null)return;const lay=cqLayout();
@@ -674,7 +670,7 @@ function endAd(){const g=G,ad=g.ad;if(DEV)(window.__adLog=window.__adLog||[]).pu
  else{g.lives=1;g.extraUsed=true;g.mode='run';g.result=null;if(g.lastCrashSit)g.queue.unshift(g.lastCrashSit);g.scenes=[];g.gaps=[];g.S=null;g.cur=null;g.phase='drive';g.gapT=2;g.v=0;musicOn();
   g.banner={t:0,l1:'EXTRA LIFE',l2:'You keep going from here',l3:'One heart left'};snd('heal')}}
 /* ---------- the end: out of lives (back to the checkpoint) and the win ---------- */
-function endLives(){const g=G;g.coins=Math.min(g.coins,g.cpCoins+C_CRASH);g.mode='end';g.endT=0;g.result={win:false};g.phase='over';lowMusic(false);if(AE)AE.stop(1.2);snd('fail');g.shake=.5}
+function endLives(){const g=G;g.coins=Math.max(0,Math.min(g.coins,g.cpCoins+C_CRASH));g.mode='end';g.endT=0;g.result={win:false};g.phase='over';lowMusic(false);if(AE)AE.stop(1.2);snd('fail');g.shake=.5}
 function winGame(){const g=G;if(g.mode==='end')return;g.mode='end';g.endT=0;g.result={win:true};g.phase='over';PROG.wins++;PROG.stage=1;PROG.coins=g.coins;saveProg();lowMusic(false);if(AE)AE.stop(1.5);snd('pass');
  for(let i=0;i<120;i++)g.conf.push({x:rnd()*W,y:-20-rnd()*300,vx:(rnd()-.5)*60,vy:60+rnd()*140,c:['#ffd23f','#35e08a','#4cc9f0','#ff5d8f','#fff'][(rnd()*5)|0],w:4+rnd()*5})}
 function backToCheckpoint(){const g=G;g.mode='run';g.result=null;g.lives=3;g.shake=0;musicOn();restoreCp()}
@@ -885,7 +881,7 @@ function drawCrash(){const g=G,c=g.cc;if(g.phase!=='crash'||!c||!c.card)return;
  labelText('RULE VIOLATED'+(Ly.cv?'   CVC '+Ly.cv:''),x+14,yy+4);yy+=16;Ly.ru.L.forEach((l,k)=>T(l,x+14,yy+10+k*(Ly.ru.sz+4),Ly.ru.sz,'#bfe6ff','left'));yy+=Ly.ru.L.length*(Ly.ru.sz+4)+10+(Ly.cv?20:0)-(Ly.cv?20:0);
  cx.strokeStyle='#4a5f8c';cx.lineWidth=1.5;cx.strokeRect(x+10,yy,w-20,44);
  for(let i=0;i<3;i++)heart(x+34+i*28,yy+22,1.1,i<g.lives);
- T('-1 HEART',x+120,yy+22,14,'#ff9f9f','left');T(C_CRASH+' coins',x+w-16,yy+22,18,'#ff9a8a','right');
+ T('-1 HEART',x+120,yy+22,14,'#ff9f9f','left');T(c.lost>0?'-'+c.lost+' coins':'0 coins left',x+w-16,yy+22,18,'#ff9a8a','right');
  T(c.final?'No hearts left':'Return to the last checkpoint',CX,yy+60,13,'#9fb3d8','center');
  cx.globalAlpha=c.ct>=.7?(.65+.35*Math.sin(g.t*6)):.3;T('TAP TO CONTINUE',CX,y+h-16,15,'#fff','center');cx.globalAlpha=1}
 function ticketLayout(o){const wh=wrapLines(o.what,322,17,3),ru=wrapLines(o.rule,322,16,4),cv=cvcOf(o.rule);return{ru,wh,cv,h:66+8+40+8+34+8+18+wh.L.length*(wh.sz+4)+8+18+ru.L.length*(ru.sz+4)+10+52+30}}
@@ -903,7 +899,7 @@ function drawTicket(){const g=G,k=g.tk;if(g.phase!=='ticket'||!k)return;
   cx.globalAlpha=k.ct>=.7?(.65+.35*Math.sin(g.t*6)):.3;T('TAP TO CONTINUE',CX,y+hh-15,15,'#555','center');cx.globalAlpha=1;return}
  if(k.st===3){const a=clamp(k.t3/.2,0,1),sh=k.left>0&&k.t3>.35;cx.save();cx.globalAlpha=a;const s=1+(sh?.04*Math.sin(g.t*40):0);cx.translate(CX,H*.42);cx.scale(s,s);
   RR(-150,-62,300,124,12);cx.fillStyle='rgba(60,10,16,.94)';cx.fill();cx.lineWidth=4;cx.strokeStyle='#ff4d4d';cx.stroke();
-  T('FINE',0,-38,19,'#ffb4b4','center');T('-'+Math.round(k.paid),0,4,64,'#ff6b6b','center',6);T('coins',0,44,18,'#ffd0d0','center');cx.restore()}}
+  T('FINE',0,-38,19,'#ffb4b4','center');if(k.take>0){T('-'+Math.round(k.paid),0,4,64,'#ff6b6b','center',6);T('coins',0,44,18,'#ffd0d0','center')}else{T('0',0,4,64,'#ff6b6b','center',6);T('no coins left to take',0,44,16,'#ffd0d0','center')};cx.restore()}}
 /* ---------- checkpoint: the situation list, three questions ---------- */
 function drawChips(x0,y0,cols,cell){const g=G;SIT.forEach((s,i)=>{const c=i%cols,r=Math.floor(i/cols),x=x0+c*(cell+4),y=y0+r*(cell+4);
  const ok=PROG.passed[s.id];cx.fillStyle=ok?'#2ecc71':'#3b4560';RR(x,y,cell,cell,5);cx.fill();T(String(i+1),x+cell/2,y+cell/2,Math.round(cell*.46),ok?'#06280f':'#9fb0cc','center')})}
@@ -1015,17 +1011,12 @@ function draw(al){const g=G,rd=g.dist,rx=g.carX;
  if(al>=0&&al<=1){g.dist=lerp(g.pd,rd,al);g.carX=lerp(g.px,rx,al)}
  cx.save();cx.clearRect(0,0,W,H);
  const sh=g.shake;cx.translate((Math.random()-.5)*sh*16,(Math.random()-.5)*sh*16);
- /* the turn: the new street swings in from the side (rotated about the car) while the old view swings out the other way and fades */
- const TE=(g.tn&&g.tn.jumped)?ease(clamp((g.tn.t-.1)/1.0,0,1)):null,TA=1.15;
- if(TE!==null){cx.fillStyle='#0b1020';cx.fillRect(-40,-40,W+80,H+80);cx.save();cx.translate(CX,GY);cx.rotate(g.tn.dir*(1-TE)*TA);cx.translate(-CX,-GY)}
+ /* the turn: the road ahead bends (BEND, set in stepTurn) and the world follows the bend; a dark fade covers the jump to the new street */
  drawWorld();drawBuildings();drawFurniture();
  const d=g.dist,dl=[];drawScenes(dl);
  dl.sort((a,b)=>b.z-a.z);for(const e of dl)if(e.z>=0)e.f();
  if(g.S&&g.S.k==='hydrant'&&!g.S.out&&g.phase==='sit')drawRulerOver(g.S,g);
- if(TE!==null)cx.restore();
- if(g.tn){const n=g.tn;
-  if(n.needSnap&&!n.snap){if(!snapC)snapC=document.createElement('canvas');snapC.width=cv.width;snapC.height=cv.height;snapC.getContext('2d').drawImage(cv,0,0);n.snap=true;n.needSnap=false}
-  else if(n.snap&&n.jumped){cx.save();cx.globalAlpha=clamp(1-TE*1.15,0,1);cx.translate(CX,GY);cx.rotate(-n.dir*TE*TA);cx.translate(-CX,-GY);cx.drawImage(snapC,0,0,W,H);cx.restore()}}
+ if(g.tn){const fa=turnFade(g.tn);if(fa>.01){cx.fillStyle='rgba(11,16,32,'+fa.toFixed(3)+')';cx.fillRect(-40,-40,W+80,H+80)}}
  drawPlayer();for(const e of dl)if(e.z<0)e.f();
  if(g.S&&g.S.k==='hydrant'&&g.phase==='sit'&&!g.S.judged&&!g.S.out)drawHydrantGauge(g.S,g);
  cx.restore();
@@ -1049,7 +1040,10 @@ async function renderOffline(kind,opt){opt=opt||{};const sec=opt.sec||8,sr=44100
  for(let i=0;i<x.length;i++){const v=x[i];pk=Math.max(pk,Math.abs(v));e+=v*v;if(Math.abs(v)>.002)lastIdx=i}
  return{peak:+pk.toFixed(3),rms:+Math.sqrt(e/x.length).toFixed(4),soundSec:+(lastIdx/sr).toFixed(2),nan:x.some(v=>v!==v)}}
 function fitCQ(){const out=[];const save=G;G=blank('run');for(const q of CQ){G.cq={i:0,qs:[q],lay:null};const l=cqLayout();const wl=wrongLayout(q);out.push({id:q.id,fs:l.fs,tot:l.tot,room:H-80-16,wrongH:wl.h,wrongRoom:H-70,wrongFs:Math.min(wl.st.sz,wl.a.sz,wl.w.sz),ok:l.tot<=H-80-16&&wl.h<=H-70,wide:Math.max(...l.rows.flatMap(r=>r.lines.map(t=>cx.measureText(t).width)),0)})}G=save;return out}
-if(DEV)window.__rush={get G(){return G},start(){startRun()},get K(){return K},SIT,RULE,CQ,get PROG(){return JSON.parse(JSON.stringify(PROG))},setProg(o){PROG=Object.assign(freshProg(),o);saveProg()},nPassed,pace:{speed:[1,2,3,4,5].map(lvSpeed),sp:[1,2,3].map(lvSP),gap:[1,2,3].map(lvGap)},
+/* test probe: the mean x of the asphalt pixels in a near row and a far row of the canvas as drawn (the road bend test) */
+function probeRoad(){const k=cv.width/W,out={};for(const[nm,y]of[['near',GY-90],['far',HOR+110]]){const row=cx.getImageData(0,Math.round(y*k),cv.width,1).data;let s=0,n=0;
+  for(let i=0;i<cv.width;i++){const r=row[i*4],g=row[i*4+1],b=row[i*4+2];if(r>50&&r<75&&Math.abs(r-g)<14&&b-r>=8&&b-r<=30){s+=i/k;n++}}out[nm]=n>6?+(s/n).toFixed(1):null;out[nm+'N']=n}return out}
+if(DEV)window.__rush={probeRoad,get bend(){return BEND},get G(){return G},start(){startRun()},get K(){return K},SIT,RULE,CQ,get PROG(){return JSON.parse(JSON.stringify(PROG))},setProg(o){PROG=Object.assign(freshProg(),o);saveProg()},nPassed,pace:{speed:[1,2,3,4,5].map(lvSpeed),sp:[1,2,3].map(lvSP),gap:[1,2,3].map(lvGap)},
  /* test: a fresh run whose only situation is sit id, stage taken from the situation, no waiting */
  forceSit(id,o){o=o||{};startRun();const g=G;const sit=SITBY[id];g.banner=null;g.stage=o.stage||sit.st;g.queue=[id];g.gapT=o.gapT===undefined?.2:o.gapT;g.stT=20;g.cruise=cruiseNow();g.v=g.cruise;if(o.lane!==undefined){g.lane=o.lane;g.carX=(o.lane-1)*LN}},
  renderOffline,get H(){return H},COPY,RUN,MINI,ADB,RESETB,STARTB,fitCQ,crashLayout,ticketLayout,wrongLayout,cqLayout,nextCQ,
@@ -1058,9 +1052,9 @@ if(DEV)window.__rush={get G(){return G},start(){startRun()},get K(){return K},SI
  peek(){const g=G,S=g.S;return{mode:g.mode,phase:g.phase,stage:g.stage,coins:g.coins,cpCoins:g.cpCoins,lives:g.lives,passed:nPassed(),total:NSIT,queue:g.queue.slice(),cur:g.cur?g.cur.sit.id:null,part:g.cur?g.cur.pi:null,
   lane:g.lane,v:g.v,d:g.dist,carX:g.carX,braking:g.braking,kind:S?S.k:null,out:S?S.out:null,sd:S&&S.zL?S.zL-g.dist:null,
   tk:g.tk?{st:g.tk.st,t:g.tk.t,fine:g.tk.fine,left:g.tk.left,paid:g.tk.paid,card:g.tk.st===2&&g.tk.dt===undefined,title:g.tk.o.title,ct:g.tk.ct}:null,
-  cc:g.cc?{t:g.cc.t,card:g.cc.card&&g.cc.dt===undefined,kind:g.cc.o.kind,title:g.cc.o.title,ct:g.cc.ct,final:g.cc.final}:null,
+  cc:g.cc?{t:g.cc.t,card:g.cc.card&&g.cc.dt===undefined,kind:g.cc.o.kind,title:g.cc.o.title,ct:g.cc.ct,final:g.cc.final,lost:g.cc.lost}:null,
   cq:g.cq?{i:g.cq.i,res:g.cq.res,n:g.cq.qs.length,id:g.cq.qs[g.cq.i].id,ci:g.cq.qs[g.cq.i].ci,t:g.cq.t,stem:g.cq.qs[g.cq.i].stem,o:g.cq.qs[g.cq.i].o,r:g.cq.qs[g.cq.i].r,f:g.cq.qs[g.cq.i].f}:null,starts:g.starts.slice(),sparks:g.sparks.length,flash:g.flash?g.flash.a:0,shake:g.shake,endT:g.endT,cp:g.cp?{st:g.cp.st}:null,
-  tn:g.tn?{t:g.tn.t,dir:g.tn.dir,snap:g.tn.snap,jumped:g.tn.jumped}:null,route:g.route?g.route.text:null,tp:Object.assign({},g.tp),runT:g.runT,log:g.log.slice(),
+  tn:g.tn?{t:g.tn.t,dir:g.tn.dir,jumped:g.tn.jumped,bend:BEND,fade:turnFade(g.tn)}:null,route:g.route?g.route.text:null,tp:Object.assign({},g.tp),runT:g.runT,log:g.log.slice(),
   crashes:g.crashes,tickets:g.tickets,reroutes:g.reroutes,passedRun:g.passedRun,sitN:g.sitN,toast:g.toast?g.toast.txt:null,cue:!!g.cue,banner:g.banner?g.banner.l1:null,
   adT:g.ad?g.ad.t:0,adAfter:g.ad?g.ad.after:null,adLog:window.__adLog||[],result:g.result,measure:g.measure?{ft:g.measure.ft,ok:g.measure.ok,head:g.measure.head}:null,
   resetArm:g.resetArm||0,idleT:g.idleT,extraUsed:g.extraUsed,qRight:g.qRight,qWrong:g.qWrong,sirenT:g.sirenT,cruise:g.cruise,stT:g.stT,gaps:g.gaps.length}}};

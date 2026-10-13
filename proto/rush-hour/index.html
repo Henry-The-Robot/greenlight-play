@@ -1027,6 +1027,7 @@ function drawLines(d){const g=G,n9=Math.floor(d/9);
   else gq(1.52,1.68,za,zh,WHT);
   if(segAt(a+2,'solidL')&&ro[0]!=='onc')gq(-1.68,-1.52,za,zb,WHT);
   if(ro[2]==='sh')gq(1.68,5,za,zb,'rgba(120,110,95,.35)');
+  if(ro[2]==='my'&&segAt(a+2,'redR'))gq(4.7,4.95,za,zb,CURBC.red);   /* RH8c: the curb lane opened for a right turn: red curb, no parking */
   if(ro[2]==='park'&&inRed(a+2))gq(4.7,4.95,za,zb,CURBC.red);   /* v7: a red curb, no parking (a weave pocket may open here) */
   else if(ro[2]==='park'){gq(1.68,4.9,za,zb,'rgba(58,62,72,.85)');if((n9+k)%2===0)gq(1.68,4.9,za+.2,za+.42,WHT)}   /* stall lines across the whole parking lane */   /* the parking lane: darker paint and stall ticks, so parked cars do not read as traffic */
   if(ro[0]==='hov'&&(n9+k)%5===0)drawDiamond(-3.2,za+2)}}
@@ -1053,11 +1054,12 @@ function genOnc(){const g=G;if(g.noWorld||g.mode!=='run'||(g.phase!=='drive'&&g.
 function laneVio(o){const g=G;if(g.pend||g.mode!=='run')return;if(DEV)(window.__laneLog=window.__laneLog||[]).push({t:o.title,x:+g.carX.toFixed(2),lane:g.lane,ph:g.phase,k:g.S&&g.S.k,out:g.S&&g.S.out,roles:rolesAt(g.dist+NOSE).join(),cl:clAt(g.dist+NOSE),lr:g.lr&&g.lr.prev});if(g.phase==='sit'&&g.S&&!g.S.out){violate(g.S,o);return}if(g.phase!=='drive')return;const S={out:null,k:'_road'};violate(S,o);startTicket()}
 function stepLaneRules(){const g=G;if(g.mode!=='run'||(g.phase!=='drive'&&g.phase!=='sit')){g.lr=null;return}
  const own=g.phase==='sit'&&g.S&&g.S.lanesOwn&&!g.S.out,z=g.dist+NOSE,ro=rolesAt(z),l=g.carX<-1.6?0:g.carX>1.6?2:1,role=ro[l];g.lr=g.lr||{prev:'my',t:0,z0:0};const lr=g.lr;
- if(role!==lr.prev){if(role==='onc'&&!own&&!passable(clAt(z))&&lr.prev!=='onc')laneVio({title:'CROSSED A SOLID YELLOW LINE',what:'You crossed a solid yellow centre line into the oncoming lane.',rule:RULE.passSolid});lr.prev=role;lr.t=0;lr.z0=g.dist}
- lr.t+=DT;
+ if(role!==lr.prev){if(role==='onc'&&!own&&!passable(clAt(z))&&lr.prev!=='onc')laneVio({title:'CROSSED A SOLID YELLOW LINE',what:'You crossed a solid yellow centre line into the oncoming lane.',rule:RULE.passSolid});lr.under=lr.pl===l&&lr.prev==='my'&&role==='sh';lr.prev=role;lr.t=0;lr.z0=g.dist}   /* RH8c: lr.under = the road changed under you (a pocket lane ended while you stayed in it): the shoulder ticket waits 3 s, not 1.2 s (the car is no longer moved out of the pocket) */
+ lr.pl=l;lr.t+=DT;
  if(own)return;
  if(role==='onc'&&lr.t>8)laneVio({title:'DROVE ON THE LEFT SIDE',what:'You stayed in the oncoming lane for a long time.',rule:RULE.leftSide});
- if(role==='sh'&&lr.t>1.2&&g.v>2)laneVio({title:'DROVE ON THE SHOULDER',what:'You drove over the white edge line onto the shoulder.',rule:RULE.edge})}
+ if(g.pullGrace>0)g.pullGrace-=DT;   /* RH8c: after parking or engine trouble you pull out yourself; the shoulder ticket waits 8 s */
+ if(role==='sh'&&lr.t>(lr.under?3.0:1.2)&&g.v>2&&!(g.pullGrace>0))laneVio({title:'DROVE ON THE SHOULDER',what:'You drove over the white edge line onto the shoulder.',rule:RULE.edge})}
 /* ---------- the speedometer (mph) and the posted limit ---------- */
 function drawSpeedo(){const g=G;if(g.mode!=='run'||!['drive','sit','turn','ticket'].includes(g.phase))return;const x=44,y=HOR+70,mph=Math.round(Math.max(0,g.v)*MPH),lim=g.limit,over=lim&&mph>lim;
  cx.save();cx.beginPath();cx.arc(x,y,31,0,6.3);cx.fillStyle='rgba(8,14,32,.85)';cx.fill();cx.lineWidth=3;cx.strokeStyle=over?'#ff4d4d':'#cfd8e3';cx.stroke();
@@ -1076,7 +1078,9 @@ function dashPress(b){const g=G;snd('tick');
  if(b==='L'||b==='R'){const dir=b==='L'?-1:1;if(g.sig&&g.sig.dir===dir)g.sig=null;else g.sig={dir,z0:g.dist,t0:g.runT}}
  else if(b==='lights'){g.lights=(g.lights+1)%4}
  else if(b==='hazard'){g.haz=!g.haz}}
-function stepDash(){const g=G;if(g.sigUsed&&g.runT-g.sigUsed.t>1.2){if(g.sig&&g.sig.dir===g.sigUsed.dir)g.sig=null;g.sigUsed=null}}   /* the signal cancels after the turn, or 1.2 s after the lane change it announced */
+/* RH8c (Kyle 10-13: "signal right, move right, keep going" lost the signal and got NO TURN SIGNAL): while a turn in that direction is ahead the signal stays on; it cancels after the turn (execTurn) */
+function turnAhead(dir){const g=G,S=g.S;return g.phase==='sit'&&!!S&&S.k==='turn'&&!S.exec&&!S.out&&!S.noSig&&(!!S.either||S.dir===dir)}
+function stepDash(){const g=G;if(g.sigUsed&&g.runT-g.sigUsed.t>1.2){if(g.sig&&g.sig.dir===g.sigUsed.dir&&!turnAhead(g.sig.dir))g.sig=null;g.sigUsed=null}}   /* the signal cancels 1.2 s after the lane change it announced (not while a turn that way is ahead) */
 /* signal on in direction dir for at least m metres (a turn) or s seconds (a lane change) */
 const sigFor=(dir,m,s)=>{const g=G,q=g.sig;if(!q||q.dir!==dir)return false;if(m!==undefined&&g.dist+NOSE-q.z0<m)return false;if(s!==undefined&&g.runT-q.t0<s)return false;return true};
 function drawDash(){if(!dashOn())return;const g=G,y=dashY(),bl=Math.floor(g.t*3)%2===0;
@@ -1156,8 +1160,7 @@ function nextSit(){const g=G;if(!g.queue.length){reachCheckpoint();return}
  const sit=SITBY[g.queue.shift()];g.cur={sit,pi:0};g.sitN++;g.starts.push({id:sit.id,t:+g.runT.toFixed(2),stage:g.stage,p:sit.parts.length});spawnPart(0)}
 function spawnPart(i){const g=G,sit=g.cur.sit,p=sit.parts[i];
  const SP=K[p.k].sp?K[p.k].sp(i):(g.sitN===1&&i===0?50:Math.max(lvSP(g.stage),p.k==='turn'?TURN_SP:0))*(i?.7:1);   /* v6b: a kind may set its own spawn distance */   /* v6: a turn spawns 100 m ahead (v5a 58 to 72): the corner and the person are in view 5 s or more before it */
- g.wantMid=0;if(i===0&&g.lane!==1&&ROADS[g.road].roles.every(r=>r==='my')){   /* v7: weaving can leave you in any lane; a situation starts with you back in the middle lane (the lane every situation was built for) when that lane is clear: nothing in it beside you or 50 m ahead (round 2: it never throws you into an obstacle you are dodging). If it is not clear now, weave.js stepWeave tries again until the situation is near. */
-  if(!g.tr.some(c=>!c.out&&!c.ghost&&!c.onc&&c.lane===1&&c.z-g.dist>-7&&c.z-g.dist<(c.ob?50:10))){g.lane=1;if(DEV)(window.__toMid=(window.__toMid||0)+1)}else g.wantMid=g.lane+1}   /* v7: weaving can leave you in any lane; a situation starts with you back in the middle lane (the lane every situation was built for), when that lane is clear beside you */
+ /* RH8c (Kyle 10-13, "it shouldn't automatically move you back into the main lane. Feels like I'm not in control."): the car never changes lane by itself. v7b moved it to the middle lane here (g.wantMid); that is gone. A situation works from the lane the player is in. */
  const S={k:p.k,v:p.v,x:p.x||0,i,age:0,out:null,legit:false,az:g.dist+SP,zL:0,endZ:0,sit};
  K[p.k].init(S);g.S=S;g.scenes.push(S);g.cur.pi=i;g.phase='sit';g.pt=0;g.idleT=0;g.honked=false;zoneFor(S)}
 /* a part is done: the next part, or the situation is passed */
@@ -1285,7 +1288,7 @@ K.ped={init(S){S.zL=S.az-1.5;S.endZ=S.az+8;S.stopT=0;S.overT=0;S.blockT=0;S.go=f
   const unm=S.v==='unmarked'||S.v==='busstop';if(unm)addGap(S.az+5,S.az+17);
   S.p={x:unm?6.6:-6.6,dir:unm?-1:1,spd:unm?2.2:2.4,walk:false,done:false,t:0,kid:unm};
   if(S.v==='cane'){S.p={x:6.6,dir:-1,spd:1.4,walk:false,done:false,t:0,cane:1};S.waitAll=true;S.rl=RULE.cane}
-  if(S.v==='hidden'){S.p.spd=2.0;S.blk=addCar({lane:0,z:S.az-6.6,v0:0,keep:true});S.rl=RULE.hidden}
+  if(S.v==='hidden'){S.p.spd=2.0;S.blk=addCar({lane:G.lane===0?1:0,z:S.az-6.6,v0:0,keep:true});   /* RH8c: the stopped car is in a lane next to yours; a player already in lane 0 gets it on his right (v7: it stood in his own lane, and stopping at the crosswalk line meant rear-ending it) */S.rl=RULE.hidden}
   if(S.v==='busstop')S.rl=RULE.busstop},
  step(S){const g=G,P_=S.p,d=S.az-g.dist,nd=S.az-(g.dist+NOSE);
   if(!S.on&&(nd/Math.max(g.v,4)<=2.4||(g.v<.3&&nd<40))){S.on=true;P_.walk=true}   /* a player who stops early still gets the person */
@@ -1503,7 +1506,7 @@ regSit({ord:76,id:'unc1',st:5,road:2,n:'Uncontrolled intersection',parts:[{k:'un
    within 200 ft; nored = No Turn On Red; lred = left on red from a one-way into a one-way street; dne / noleft / noright = pick the legal way at a junction (signs); ubiz / usign / ures = U-turns.
    From the two-way street on, every turn needs the turn signal on 100 ft (30 m) before the corner (s5-09).
    Built from: the California Driver Handbook sections "Turns", "U-turns", "Two-way left-turn lanes", "Bike lanes"; the corner turn of Temple Run (a swipe queued until the corner). */
-addRule('signal','Turn signals must be activated at least 100 feet before turning.','22108');
+addRule('signal','Signal before the white SIGNAL line, 100 ft before the corner.','22108');   /* RH8c: the line is painted on the road (Kyle 10-13: "There's no way of knowing when you signal 100' before a turn") */
 addRule('lefty','Turning left, yield to oncoming vehicles that are close enough to be a hazard.','21801');
 addRule('yarrow','A yellow arrow signal means your protected turn time is ending; complete the turn only if already in intersection.','21452');
 addRule('fya','A flashing yellow arrow signal means a left turn is permitted but not protected; yield to oncoming traffic before turning.','21452');
@@ -1520,7 +1523,7 @@ addRule('usign','No U-Turn: do not make a U-turn here.','21461');
 addRule('wrongw','Wrong Way: you are driving against traffic. Stop and turn around safely.','21651');
 addRule('ures','U-turns require a clear line of sight of at least 200 feet in each direction on residential streets.','22103');
 const oncNear=(S,sec)=>G.tr.find(c=>c.onc&&!c.out&&c.z>S.az-8&&(c.z-(S.az-2))/Math.max(c.v,1)<sec);
-function oncFlow(S,times){S.noOnc=true;S.fl=S.fl||0;while(S.fl<times.length&&S.age>=times[S.fl]){addCar({lane:0,z:G.dist+200,v0:vRef()*.85,onc:true,keep:true});S.fl++}}
+function oncFlow(S,times){S.noOnc=true;S.fl=S.fl||0;while(S.fl<times.length&&S.age>=times[S.fl]+(S.v==='yarrow'?0:(S.dl||0))){   /* (yarrow times its flow from S.t0 already: no second shift) */   /* RH8c: S.dl = the extra approach time of the longer spawn distance (turnPlanInit), so the oncoming cars still arrive at the corner when the player does */addCar({lane:0,z:G.dist+200,v0:vRef()*.85,onc:true,keep:true});S.fl++}}
 function drawSignBoard(lines,bg,fg,ed){const n=lines.length,h=.36*n+.3,y0=2.3,w=1.5;rc(-.06,0,.12,y0,'#8a8f98');rc(-w/2,y0,w,h,ed||'#111');rc(-w/2+.06,y0+.06,w-.12,h-.12,bg);
  cx.save();cx.textAlign='center';cx.textBaseline='middle';cx.fillStyle=fg;cx.font='bold .3px '+FONT;const mw=Math.max(...lines.map(l=>cx.measureText(l).width)),k=Math.max(.7,Math.min(1,(w-.12)/Math.max(mw,.01)));cx.font='bold '+(.3*k).toFixed(3)+'px '+FONT;   /* a long line shrinks to fit its board (down to 70 percent) */
  lines.forEach((l,i)=>cx.fillText(l,0,-(y0+h-.15-.36*(i+.5))));cx.restore()}
@@ -1600,16 +1603,47 @@ TV.exit={dir:1,need:2,init(S){S.ciRule=RULE.exit;S.text='Exit 23 ahead: right la
  ground(S,d){const z=S.az-d;gq(1.5,1.7,z-40,z,'#fff');gq(4.6,4.75,z-40,z,'#fff')},
  props(S,dl,z){P(dl,3.2,z-110,()=>{rc(-.06,0,.12,5,'#8a8f98');rc(-1.6,5,3.2,1.4,'#1e7a3a');cx.save();cx.fillStyle='#fff';cx.font='bold .3px '+FONT;cx.textAlign='center';cx.fillText('EXIT 23',0,-6.0);cx.fillText('Main St',0,-5.6);cx.font='bold .22px '+FONT;cx.fillText('1/2 MILE',0,-5.25);cx.restore()},1,0,1.3);P(dl,4.2,z-2,()=>drawSignBoard(['EXIT','↗'],'#1e7a3a','#fff','#fff'),1,0,1.4)},
  oracle(S,g,m){const n=g.dist+NOSE;return{lane:m==='tk'?(n>S.az-36?2:1):(n>S.az-130?2:1),go:true}}};
+/* ---------- RH8c (card RH8c, Kyle 10-13): fair turns ----------
+ Built from: the CVC 22108 rule (signal for the last 100 ft before a turn) and the human-factors rule of a warning sign that gives a reaction time, not a fixed distance
+ (brief time = read time + reaction time + lane-change time). Four fixes:
+ (a) the turn instruction appears so that the player has a time budget before the 100 ft point: read time (0.3 s per word, at least 2.0 s) + 1.5 s to react + 1.0 s if a lane change is needed.
+     Spawn distance = 30 m + the metres between the 100 ft point's turn trigger and the corner + speed x budget, never under TURN_SP (100 m) (v8: a fixed 100 m = 3.7 s at stage 4, 2.5 s at stage 9);
+ (b) a white SIGNAL line is painted 30 m before the corner from the first frame, with a 100 FT sign at the roadside; the banner has a bar that empties as the car nears the line;
+ (c) the judge reads the lane the player chose (g.lane, the lane tapped to), not the x position in the middle of a lane-change animation (carX);
+ (d) a right turn (or the either-way junction) on a road whose curb lane is parking or shoulder opens that lane as a travel lane (no parked car, red curb) from the instruction to the corner. */
+const SIG_FT=30;   /* m: 100 ft (30.48) before the turn trigger */
+const turnNeed=v=>v==='left'?0:TV[v]?TV[v].need:2;
+const turnNeedsSig=S=>G.road>=2&&!S.noSig;
+const turnCurbOpen=(v,road)=>{const T_=TV[v],dir=v==='left'?-1:T_?T_.dir:1;return(dir>0||!!(T_&&T_.either))&&ROADS[road].roles[2]!=='my'&&v!=='bikelane'&&v!=='wrongway'&&v!=='exit'};
+const turnExecOff=v=>v==='ubiz'?48:6;   /* the turn starts this far before S.az (a U-turn in a business district starts mid-block) */
+function turnExecNose(S){return S.v==='ubiz'?S.mid:S.v==='usign'&&S.passed1?S.az2-6:S.az-6}
+const turnSigZ=S=>turnExecNose(S)-SIG_FT;   /* the absolute g.dist of the SIGNAL line: sigFor(dir,SIG_FT) at the turn needs the signal on 30 m of travel before the nose reaches the trigger */
+function turnBannerOf(v,road,dir,either,u){
+ if(v==='wrongway')return['WRONG WAY!','Stop, then swipe left to turn around.'];
+ if(either)return['TURN AHEAD: LEFT OR RIGHT','Read the signs. Swipe the legal way.'];
+ if(u)return['TURN AROUND AHEAD (U-TURN)','Left lane. Swipe left where a U-turn is legal.'];
+ return[dir>0?'TURN RIGHT AHEAD':'TURN LEFT AHEAD',road>=2?'Signal before the line.':dir>0?'Right lane. Swipe right at the corner.':'Left lane. Swipe left at the corner.']}
+/* the plan of the part i of the current situation: words of the banner, whether a lane change is needed, the time budget (s) and the spawn distance it asks for */
+function turnPlan(i){const g=G,v=g.cur.sit.parts[i].v,T_=TV[v],dir=v==='left'?-1:T_?T_.dir:1,either=!!(T_&&T_.either),u=!!(T_&&T_.u),bn=turnBannerOf(v,g.road,dir,either,u),words=wc(bn[0])+wc(bn[1]);
+ const need=turnNeed(v),lc=!(g.lane===need||(turnCurbOpen(v,g.road)&&g.lane===2)),budget=Math.max(2.0,.3*words)+1.5+(lc?1:0),vv=Math.max(8,g.cruise)*1.02;
+ return{v,words,lc,budget,vv,spB:turnExecOff(v)+SIG_FT+vv*budget}}
+function turnPlanInit(S){const g=G,pl=turnPlan(S.i);S.plan=pl;S.d0=g.dist;S.on=true;   /* the instruction shows from the spawn */
+ S.curbOpen=turnCurbOpen(S.v,g.road);
+ if(S.curbOpen){const ro=rolesAt(S.az).slice();ro[2]='my';S.seg=(S.seg||[]).concat([{a:g.dist-20,b:S.az+8,roles:ro,redR:true}]);S.pfree=[g.dist-20,S.az+8]}   /* the curb lane is a travel lane: red curb, no parked car, no pocket */
+ S.sigZ=turnSigZ(S);
+ S.dl=Math.max(0,((S.az-g.dist)-turnSpOld(S.i))/Math.max(8,g.cruise));   /* seconds of extra approach compared with the v7c spawn distance */
+ if(DEV)(window.__turnLog=window.__turnLog||[]).push({id:g.cur.sit.id,v:S.v,stage:g.stage,road:g.road,lane0:g.lane,cruise:+g.cruise.toFixed(2),words:pl.words,lc:pl.lc,budget:+pl.budget.toFixed(2),sp:+(S.az-g.dist).toFixed(1),spB:+pl.spB.toFixed(1),sigAfter:+(S.sigZ-g.dist).toFixed(1),tToLine:+((S.sigZ-g.dist)/Math.max(1,pl.vv/1.02)).toFixed(2),curbOpen:S.curbOpen})}
 const isOld=v=>v==='right'||v==='ped'||v==='red'||v==='left';
 K.turn={init(S){const g=G,left=S.v==='left';S.dir=left?-1:1;S.need=left?0:2;S.zL=S.az-8;S.endZ=S.az+8;addGap(S.az-6,S.az+6);S.stopT=0;S.overT=0;S.q=0;S.exec=false;S.zc=S.az+2;S.ciRule=RULE.rtor;
   S.text=left?'Turn left ahead: left lane':'Turn right ahead: right lane';
   if(S.v==='ped'){S.w={z:S.az+5.6,x:6.2,t:0,walk:false,done:false};G.nofurn=[S.az-26,S.az+8]}   /* no tree or lamp stands between the car and the person */
   else G.nofurn=null;   /* v6: on the sidewalk at the corner (v5a: x 7.6, off the screen edge), in view from the start */
   S.light=S.v==='red'?'r':S.v==='left'?'a':null;if(S.v==='red'){S.o={x:-16,dir:1,spd:8,col:'#e63946',rot:0,hit:0,pass:false,go:false}}
-  const T_=TV[S.v];if(T_){S.dir=T_.dir;S.need=T_.need;S.light=null;S.either=!!T_.either;S.u=!!T_.u;if(S.u)S.text='Turn around ahead';if(S.either)S.text='Turn ahead: left or right';T_.init(S)}},
+  const T_=TV[S.v];if(T_){S.dir=T_.dir;S.need=T_.need;S.light=null;S.either=!!T_.either;S.u=!!T_.u;if(S.u)S.text='Turn around ahead';if(S.either)S.text='Turn ahead: left or right';T_.init(S)}
+  turnPlanInit(S)},
  step(S){const g=G,d=S.zL-g.dist,T_=TV[S.v],tz=S.v==='usign'&&S.passed1?S.az2:S.az,nd=tz-6-(g.dist+NOSE);
   if(!S.on&&S.az-g.dist<=100){S.on=true}
-  g.route=!S.exec&&(S.az-g.dist<=100||S.near)?{dir:S.either?0:S.dir,text:S.text,top:S.top||(S.either?'TURN AHEAD: LEFT OR RIGHT':S.u?'TURN AROUND AHEAD (U-TURN)':null),sub:S.sub||(S.either?'Read the signs. Swipe the legal way.':S.u?'Left lane. Swipe left where a U-turn is legal.':null)}:null;
+  {const bn=turnBannerOf(S.v,g.road,S.dir,S.either,S.u);g.route=!S.exec&&S.on?{dir:S.either?0:S.dir,text:S.text,top:S.top||bn[0],sub:S.sub||bn[1],sig:turnNeedsSig(S)?{z:S.sigZ,d0:S.d0,on:!!g.sig&&(g.sig.dir===S.dir||!!S.either)}:null}:null}   /* RH8c: the banner shows from the spawn, with the signal bar */
   if(S.v==='ped'||S.v==='red'||(T_&&T_.stops)){
    if(g.v<.3&&S.az-g.dist>=NOSE+.1)S.stopT+=DT;else if(g.v>=.3)S.stopT=0;if(S.stopT>=1)S.stopped=true}
   if(S.w){const w=S.w;if(!w.walk&&((S.az-6-(g.dist+NOSE))/Math.max(g.v,4)<=PED_BEAT||(g.v<.3&&nd<40)))w.walk=true;if(w.walk&&!w.done){w.z-=2.0*DT;w.t+=DT;if(w.z<S.az-6.2)w.done=true}}
@@ -1626,6 +1660,7 @@ K.turn={init(S){const g=G,left=S.v==='left';S.dir=left?-1:1;S.need=left?0:2;S.zL
   if(S.v==='ped'){for(let x=5.3;x<8.9;x+=1.1)gq(x,x+.55,S.az-6.2-d,S.az+5.8-d,'#f6f6f6');   /* v6: the crossing across the side street, bars along the walking direction, right beside the road */
    if(S.w&&!S.w.done){const pu=.5+.5*Math.sin(G.t*7);gq(5.2,8.8,S.az-6.2-d,S.az+5.8-d,'rgba(255,214,10,'+(.1+.1*pu).toFixed(3)+')')}}
   if(S.v==='red'||S.v==='ped'||(T_&&T_.stops))gq(-5,5,S.zL-d-.25,S.zL-d+.25,'#fff');
+  if(S.sigZ!==undefined&&!S.exec&&turnNeedsSig(S)){const zl=S.sigZ-d;gq(-5,5,zl-.3,zl+.3,'#fff');at(0,zl+3.6,()=>{cx.save();cx.scale(1,.34);cx.fillStyle='rgba(255,255,255,.92)';cx.font='bold 1.7px '+FONT;cx.textAlign='center';cx.textBaseline='middle';cx.fillText('SIGNAL',0,0);cx.restore()})}   /* RH8c: the white SIGNAL line, 30 m before the turn trigger */
   if(T_&&T_.ground)T_.ground(S,d);
   if(S.v==='usign')gq(-60,60,S.az2-d-6,S.az2-d+6,'#3a404d');
   if(S.seg&&S.v==='bikelane'){const a=Math.max(S.seg[0].a-d,-10),b=S.az+8-d;if(b>a)gq(1.7,4.9,a,b,'rgba(46,160,67,.45)')}
@@ -1634,6 +1669,7 @@ K.turn={init(S){const g=G,left=S.v==='left';S.dir=left?-1:1;S.need=left?0:2;S.zL
   if(S.light){const f=()=>{signal(S.light==='r'?'r':'g',S.age);if(S.light==='a'){cx.save();cx.translate(0,6.55);cx.fillStyle='#fff';cx.beginPath();cx.moveTo(.3,0);cx.lineTo(-.25,0);cx.lineTo(-.25,.22);cx.lineTo(-.6,-.1);cx.lineTo(-.25,-.42);cx.lineTo(-.25,-.2);cx.lineTo(.3,-.2);cx.fill();cx.restore()}};
    P(dl,5.4,z+7,f,1,0,.9);P(dl,-5.4,z+7,f,1,0,.9)}
   if(T_&&T_.props)T_.props(S,dl,z);
+  if(S.sigZ!==undefined&&!S.exec&&turnNeedsSig(S)&&S.sigZ-G.dist>1)P(dl,5.9,S.sigZ-G.dist,()=>plainBoard(['100 FT'],'#fff','#111'),1,0,1.3);   /* RH8c: the 100 FT sign at the side of the road, at the SIGNAL line */
   if(S.v==='ped'){const wz=S.az-G.dist;P(dl,5.9,wz-38,()=>signPole('ped'),1,0,1.4)}
   if(S.w&&!S.w.done){const w=S.w;   /* v6: the person is big (scale 2.0), hi-vis yellow with a white halo, and stands at the corner from the start; a red mark shows above while they wait */
    P(dl,w.x,w.z-G.dist,()=>{ci(0,1.0,1.35,'rgba(255,255,255,'+(.3+.12*Math.sin(G.t*7)).toFixed(3)+')');person('#ffe600',w.t,w.walk?1:0,'#ff6a00',1);
@@ -1647,16 +1683,18 @@ K.turn={init(S){const g=G,left=S.v==='left';S.dir=left?-1:1;S.need=left?0:2;S.zL
   if(o.go&&o.hold===undefined&&(S.v==='fya'))a.h=false;else if(!o.go&&o.hold===undefined)a.h=d<=g.v*g.v/22+g.v*.07+7;
   return a}};
 /* v6b: a turn variant spawns further ahead (the centre turn lane and the bike lane need 200 ft of road before the corner; a U-turn has a block before it) */
-K.turn.sp=i=>{const g=G,v=g.cur.sit.parts[i].v,base=(g.sitN===1&&i===0?50:Math.max(lvSP(g.stage),TURN_SP))*(i?.7:1);if(v==='twl'||v==='bikelane')return 210;if(v==='exit')return 170;if(v==='wrongway')return 130;if(v==='ubiz'||v==='usign')return Math.max(base,110);if(TV[v])return Math.max(base,80);return base};
+const turnSpOld=i=>{const g=G,v=g.cur.sit.parts[i].v,base=(g.sitN===1&&i===0?50:Math.max(lvSP(g.stage),TURN_SP))*(i?.7:1);if(v==='twl'||v==='bikelane')return 210;if(v==='exit')return 170;if(v==='wrongway')return 130;if(v==='ubiz'||v==='usign')return Math.max(base,110);if(TV[v])return Math.max(base,80);return base};
+K.turn.sp=i=>Math.max(TURN_SP,turnSpOld(i),turnPlan(i).spB);   /* RH8c: the spawn distance follows the time budget (a test mutant puts turnSpOld back) */
 function execTurn(S,extra){const g=G;S.exec=true;g.route=null;fadeTraffic(true);let vio=null,crash=null;const T_=TV[S.v];
- const laneOk=Math.abs(g.carX-(S.need-1)*LN)<1.7,dir=S.either&&S.chosen?S.chosen:S.dir;
+ const dir=S.either&&S.chosen?S.chosen:S.dir,laneOk=g.lane===S.need||(dir>0&&S.curbOpen&&g.lane===2);   /* RH8c: the lane the player chose (v8: the x position, which is wrong in the middle of a lane change) */
  if(!laneOk)vio={title:dir>0?'RIGHT TURN FROM THE WRONG LANE':'LEFT TURN FROM THE WRONG LANE',what:dir>0?'You turned right from a lane that is not next to the curb.':'You turned left from a lane that is not the left lane.',rule:S.v==='twl'?RULE.twl:S.v==='bikelane'?RULE.bikeln:dir>0?RULE.turnR:RULE.turnL};
  if(S.v==='ped'&&S.w&&S.w.walk&&!S.w.done)crash={kind:'near',title:'NEAR MISS: PERSON CROSSING',what:'You started a turn while a person was crossing the street you turned into.',rule:RULE.ped};
  if(S.v==='red'){if(!S.stopped&&!vio)vio={title:'RIGHT ON RED WITHOUT A FULL STOP',what:'You turned right on red without stopping first.',rule:RULE.rtor};
   if(S.o&&S.o.go&&!S.o.pass&&Math.abs(S.o.x-g.carX)<7)crash={kind:'hit',title:'DROVE INTO CROSS TRAFFIC',what:'You turned right on red into a car that had the green.',rule:RULE.rtor}}
  if(T_){const r=extra||(T_.check?T_.check(S):null);if(r&&r.crash)crash=r.crash;if(r&&r.vio&&!vio)vio=r.vio;
   if(S.either&&dir!==S.dir&&!vio)vio=S.wrong;
-  if(g.road>=2&&!vio&&!S.noSig&&!sigFor(dir,30))vio={title:'NO TURN SIGNAL',what:'You turned without signalling for the last 100 feet.',rule:RULE.signal}}
+  }
+ if(g.road>=2&&!vio&&!S.noSig&&!sigFor(dir,SIG_FT))vio={title:'NO TURN SIGNAL',what:'You did not signal before the white SIGNAL line, 100 ft before the corner.',rule:RULE.signal}   /* RH8c: every kind, not only the v6b variants (the plain turns had no signal rule off road 1; the registry has none there, the test forces them) */
  if(crash){S.exec=false;S.q=0;S.crashed=true;if(S.o)S.o.x=g.carX-3.2;crashNow(S,crash);return}
  if(vio){S.out='ticket';S.vio=vio;g.pend=S}
  g.sig=null;g.phase='turn';g.tn={t:0,dir,jumped:false,S};snd('swipe')}
@@ -1906,7 +1944,7 @@ regKind('park',{zpre:null,sp(){return 95},
     if(Z.tight&&Z.tight.some(over)){crashNow(S,{kind:'hit',title:'BUMPED A PARKED CAR',what:'The space was too short for your car. You hit the car behind it.',rule:RULE.gap3});return}
     const b=(Z.bad||[]).find(over);
     if(b){const ft=Math.max(0,Math.round((S.az-nose)/FT));violate(S,b[2]==='cross'?{title:'PARKED TOO CLOSE TO A CROSSWALK',what:'You parked '+ft+' ft from the crosswalk.',rule:RULE.cross20}:b[2]==='hatch'?{title:'PARKED IN THE CROSSHATCH AREA',what:'Your car stands on the striped area next to a disabled space.',rule:RULE.hatch}:b[2]==='blue'?{title:'PARKED IN A DISABLED SPACE',what:'You parked in a blue disabled space without a placard.',rule:RULE.blue_c}:{title:'PARKED AT A NO PARKING SIGN',what:'You parked where the sign says No Parking.',rule:RULE.nopark});g.measure={t:0,ok:false,ft:null,head:'Not legal',sub:'Read the curb and the signs.'}}
-    else if(Z.ok.some(inside)){S.out='ok';cueGo();g.measure={t:0,ok:true,ft:null,head:'Parked!',sub:'A legal space. The car pulls out.'};g.lane=1}
+    else if(Z.ok.some(inside)){S.out='ok';cueGo();g.measure={t:0,ok:true,ft:null,head:'Parked!',sub:'A legal space. Tap the middle lane to pull out.'};g.pullGrace=8}   /* RH8c: v6b moved the car to lane 1 here (g.lane=1); now you pull out yourself */
     else{S.judged=false;S.stopT=-1;g.measure={t:0,ok:false,far:true,ft:null,head:'Not in a space',sub:'Stop with your whole car inside a marked space.'}}}}
   else if(g.v>=.3)S.stopT=Math.min(S.stopT,0);
   if(nose>S.az+8&&!S.out)S.out='miss'},
@@ -1928,7 +1966,7 @@ regKind('hill',{zpre:null,sp(){return 95},
   if(!S.parked&&g.carX>2.2&&g.v<.3&&nose>S.az-40){S.stopT+=DT;if(S.stopT>.5){S.parked=true;S.task='Set the parking brake: turn the wheels (swipe)';snd('tick')}}else if(g.v>=.3)S.stopT=0;
   if(nose>S.az+8&&!S.out)S.out='miss'},
  onSwipe(S,dir){if(!S.parked||S.done||S.out||(dir!=='left'&&dir!=='right'))return;S.done=true;snd('swipe');S.task=null;
-  if(dir===S.want){S.out='ok';cueGo();G.lane=1;G.measure={t:0,ok:true,ft:null,head:'Wheels '+(dir==='left'?'left':'right'),sub:S.v==='up'?'Away from the curb: the car rolls back into it.':S.v==='down'?'Toward the curb: the car rolls into it.':'Toward the edge: the car rolls off the road.'}}
+  if(dir===S.want){S.out='ok';cueGo();G.pullGrace=8;G.measure={t:0,ok:true,ft:null,head:'Wheels '+(dir==='left'?'left':'right'),sub:S.v==='up'?'Away from the curb: the car rolls back into it.':S.v==='down'?'Toward the curb: the car rolls into it.':'Toward the edge: the car rolls off the road.'}}   /* RH8c: no automatic lane move (v6b: G.lane=1) */
   else violate(S,{title:'WHEELS TURNED THE WRONG WAY',what:'On this hill your car could roll into traffic.',rule:S.ciRule})},
  missMsg:'You did not park on the hill. Try again later.',
  ground(S,d){const a=S.az-d;if(S.v==='nocurb')gq(4.9,7.6,a-60,a+12,'#8b7355');else gq(4.9,5.1,a-60,a+12,'#d9d3c3')},
@@ -1996,12 +2034,12 @@ addRule('brokenW','Broken white lane line: lanes go the same way. You may change
 addRule('laneEnd','Lane Ends: your lane ends ahead. Merge into the open lane.','21658');
 addRule('laneAdd','Added Lane: a new lane begins on the right. You may use it.','21658');
 const divSeg=(S,a,b,ex)=>{S.seg=[Object.assign(G.road===4?{a,b}:{a,b,roles:['my','my','sh']},ex||{})];S.noOnc=true;for(const c of G.tr)if(c.onc)c.out=true};   /* the freeway keeps its three lanes */
-const needLane=l=>{fadeTraffic(true);G.lane=l};   /* v6b: a situation that needs you in one lane moves the car there as it comes into view (other traffic leaves first) */
+const needLane=()=>{fadeTraffic(true)};   /* RH8c: v6b moved the car to the lane the situation was built for (G.lane=l). That is gone (Kyle 10-13: the car never changes lane by itself): other traffic leaves, and the scripted cars take their lane from the lane YOU are in (S.L) */
 const followTgt=(lead,cr,gm)=>{const gap=lead.z-G.dist;if(gap>-2&&gap<60)return Math.min(cr,Math.max(0,lead.v+(gap-gm)*.5));return cr};
 function truckSide(t){rc(-1.4,0,.55,.6,'#111');rc(.85,0,.55,.6,'#111');rc(-1.45,.45,2.9,3.6,'#dfe3e8');rc(-1.45,.45,2.9,.28,'#555');rc(-.06,.8,.12,3.1,'#b8bec6');rc(-1.35,.6,.4,.26,t.brk?'#ff2020':'#b02a22');rc(.95,.6,.4,.26,t.brk?'#ff2020':'#b02a22');if(t.blink&&Math.floor(G.t*3)%2)ci(1.3,1.2,.32,'#ffb300');
  cx.save();cx.fillStyle='rgba(255,60,40,.0)';cx.restore()}
 regKind('truck',{zpre:null,sp(){return 70},
- init(S){const g=G;divSeg(S,g.dist-10,S.az+340);needLane(1);S.t={z:S.az,v:Math.min(17,g.cruise*.72),lane:1,x:0,blink:0};S.tg=0;S.side=0;S.ciRule=RULE.truckBS},
+ init(S){const g=G;divSeg(S,g.dist-10,S.az+340);needLane();{const L=clamp(g.lane,1,g.road===3?1:2);S.t={z:S.az,v:Math.min(17,g.cruise*.72),lane:L,x:(L-1)*LN,blink:0}};S.tg=0;S.side=0;S.ciRule=RULE.truckBS},
  tgt(S,cr){const g=G,t=S.t;if(g.lane===t.lane&&!S.moving)return followTgt({z:t.z-6,v:t.v},cr,6);if(g.lane!==t.lane&&t.z-g.dist>-16&&t.z-g.dist<30)return cr+3;return cr},
  step(S){const g=G,t=S.t;S.on=true;S.legit=false;t.z+=t.v*DT;t.x+=((t.lane-1)*LN-t.x)*(1-Math.exp(-DT*1.5));
   const rear=t.z,front=t.z+11,nose=g.dist+NOSE,sameLane=Math.abs(g.carX-t.x)<2.2;
@@ -2011,7 +2049,7 @@ regKind('truck',{zpre:null,sp(){return 70},
   if(S.wasBeside&&g.lane===t.lane&&g.dist>front&&!S.cut){S.cut=true;if(g.dist-front<12&&!S.out)violate(S,{title:'CUT IN FRONT OF A TRUCK',what:'You moved back in front of a large truck too close.',rule:RULE.truckTG})}
   if(!sameLane&&g.dist<front+2&&nose>rear)S.wasBeside=true;
   if(g.lane>t.lane&&nose>front&&g.dist<front+2&&!S.out&&!S.moving)violate(S,{title:'PASSED A TRUCK ON THE RIGHT',what:'You overtook a large truck on its right side, where the driver cannot see you.',rule:RULE.truckTG});
-  if(S.cut&&g.dist-front>14&&!S.out)S.out='ok';if(g.dist>S.seg[0].b&&!S.out)S.out='miss'},
+  if(S.cut&&g.dist-front>14&&!S.out)S.out='ok';if(S.wasBeside&&g.lane<t.lane&&g.dist>front+16&&!S.cut&&!S.out)S.out='ok';   /* RH8c: passed on the left and stayed in the left lane: that is a pass too */if(g.dist>S.seg[0].b&&!S.out)S.out='miss'},
  missMsg:'You stayed behind the truck. Pass it on the left.',
  props(S,dl){const t=S.t;P(dl,t.x,t.z-G.dist,()=>truckSide(t),1,0,1.25);const z=t.z-G.dist;if(z>-14&&z<40)P(dl,t.x+(t.x<0?3.2:-3.2),z-1,()=>{cx.save();cx.globalAlpha=.25;rc(-1.4,0,2.8,.05,'#ff3b20');cx.restore()},1,0,1)},
  ground(S,d){const t=S.t,z=t.z-d;if(z>-12&&z<60){for(const s of[-1,1]){const x=t.x+s*LN;if(Math.abs(x)<4.9)gq(x-1.5,x+1.5,z-7,z+3,'rgba(255,59,32,.22)')}}},   /* the no-zone beside the truck */
@@ -2019,7 +2057,7 @@ regKind('truck',{zpre:null,sp(){return 70},
   if(m==='crash'){if(g.lane!==t.lane){const bes=nose>t.z-2&&g.dist<t.z+6;return{h:bes?g.v>t.v-.3:false}}return{lane:0,h:false}}
   if(g.lane===t.lane&&!S.cut&&gap<40&&gap>-2)return{lane:t.lane===1?0:1,h:false};if(g.lane!==t.lane&&g.dist>t.z+11+16)return{lane:t.lane,h:false};return{h:false}}});
 regKind('tail',{zpre:null,sp(){return 40},
- init(S){const g=G;divSeg(S,g.dist-10,S.az+380);needLane(0);S.c=addCar({lane:0,z:g.dist-24,v0:g.v+4,keep:true,draw:c=>{carFront('#e9c46a',true)}});S.c.behind=true;S.bk=0;S.ciRule=RULE.tail},
+ init(S){const g=G;divSeg(S,g.dist-10,S.az+380);needLane();S.L=g.lane;S.c=addCar({lane:S.L,z:g.dist-24,v0:g.v+4,keep:true,draw:c=>{carFront('#e9c46a',true)}});S.c.behind=true;S.bk=0;S.ciRule=RULE.tail},
  step(S){const g=G,c=S.c,gp=g.dist-c.z;S.on=true;S.legit=false;if(g.lane===c.lane&&gp<12&&gp>0){c.flash=1}
   if(g.braking&&g.lane===c.lane&&gp<14){S.bk+=DT;if(S.bk>.35&&!S.out){crashNow(S,{kind:'behind',title:'BRAKE-CHECKED A TAILGATER',what:'You braked hard with a car right behind you, and it hit you.',rule:RULE.tail});return}}else S.bk=0;
   if(c.z>g.dist+8&&!S.out){c.v0=g.cruise+4;S.out='ok'}
@@ -2027,9 +2065,9 @@ regKind('tail',{zpre:null,sp(){return 40},
  missMsg:'The tailgater stayed behind you. Move right when it is clear and let it pass.',
  props(S,dl){},
  over(S,g){const c=S.c,gp=g.dist-c.z;if(gp>0&&gp<30&&g.lane===c.lane&&Math.floor(g.t*4)%2){cx.save();cx.globalAlpha=.35;cx.fillStyle='#fffbe0';cx.fillRect(0,H-150,W,150);cx.restore();T('A car is tailgating you',CX,H-170,15,'#fff','center',3)}},
- oracle(S,g,m){if(m==='crash')return{h:S.c.z>g.dist-16&&g.lane===0};const ahead1=g.tr.some(o=>!o.onc&&o.lane===1&&Math.abs(o.z-g.dist)<10);return{lane:S.age>1.2&&!ahead1?1:0,h:false}}});
+ oracle(S,g,m){if(m==='crash')return{h:S.c.z>g.dist-16&&g.lane===S.L};const R=S.L<2?S.L+1:S.L-1,aheadR=g.tr.some(o=>!o.onc&&o.lane===R&&Math.abs(o.z-g.dist)<10);return{lane:S.age>1.2&&!aheadR?R:S.L,h:false}}});   /* RH8c: the tailgater is in the lane you are in; move right (left from the right lane) and let it pass */
 regKind('follow',{zpre:null,dec:8,sp(){return 75},
- init(S){const g=G;S.fire=S.v==='fire';needLane(1);S.c=addCar({lane:1,z:S.az+(S.fire?65:0),v0:g.cruise*(S.fire?.78:.72),keep:true,draw:S.fire?c=>{ambu(false,G.t);rc(-1.15,.42,2.3,.6,'#d62828')}:null});S.set=null;S.ciRule=S.fire?RULE.fire300:RULE.gap3s;S.close=0;S.noOnc=false},
+ init(S){const g=G;S.fire=S.v==='fire';needLane();S.L=g.road===3?1:g.lane;S.c=addCar({lane:S.L,z:S.az+(S.fire?65:0),v0:g.cruise*(S.fire?.78:.72),keep:true,draw:S.fire?c=>{ambu(false,G.t);rc(-1.15,.42,2.3,.6,'#d62828')}:null});S.set=null;S.ciRule=S.fire?RULE.fire300:RULE.gap3s;S.close=0;S.noOnc=false},
  tgt(S,cr){return S.set!==null?Math.min(cr,S.set):cr},
  step(S){const g=G,c=S.c,nose=g.dist+NOSE,gapM=c.z-nose,gapS=gapM/Math.max(g.v,1);S.on=true;S.legit=false;S.gapS=gapS;S.gapM=gapM;
   if(g.braking)S.wasB=true;else if(S.wasB){S.wasB=false;S.set=g.v}
@@ -2042,12 +2080,12 @@ regKind('follow',{zpre:null,dec:8,sp(){return 75},
   cx.save();RR(70,150,250,40,12);cx.fillStyle='rgba(8,14,32,.85)';cx.fill();cx.lineWidth=2;cx.strokeStyle=ok?'#35e08a':'#ff9a8a';cx.stroke();T((S.fire?'Fire truck: ':'Gap: ')+s,CX,170,16,ok?'#7dffb0':'#ffb0a0','center');cx.restore()},
  oracle(S,g,m){if(m==='tk')return{h:false};if(S.fire)return{h:S.gapM<125};if(S.braked&&S.c.brk)return{h:S.gapM<30};return{h:S.gapS<3.4}}});
 regKind('moto',{zpre:null,sp(){return 70},
- init(S){const g=G;divSeg(S,g.dist-10,S.az+300);needLane(1);S.slow=addCar({lane:1,z:S.az-20,v0:g.cruise*.7,keep:true});S.m=null;S.ciRule=RULE.moto},
- tgt(S,cr){return G.lane===1?followTgt(S.slow,cr,12):cr},
- step(S){const g=G;S.on=true;S.legit=false;if(!S.m&&S.age>1.0){S.m=addCar({lane:0,z:g.dist-45,v0:g.v+7,keep:true,moto:true});S.m.behind=true;S.m.col='#d62d20'}
-  const m=S.m;if(m&&g.carX<-1.6&&Math.abs(m.z-g.dist)<4.5&&!S.out&&!m.hit){m.hit=1;crashNow(S,{kind:'hit',title:'CHANGED LANES INTO A MOTORCYCLE',what:'A motorcycle was passing in the next lane and you moved into it.',rule:RULE.moto});return}
+ init(S){const g=G;divSeg(S,g.dist-10,S.az+300);needLane();S.L=g.lane;S.ML=S.L>0?S.L-1:1;S.slow=addCar({lane:S.L,z:S.az-20,v0:g.cruise*.7,keep:true});S.m=null;S.ciRule=RULE.moto},
+ tgt(S,cr){return G.lane===S.L?followTgt(S.slow,cr,12):cr},
+ step(S){const g=G;S.on=true;S.legit=false;if(!S.m&&S.age>1.0){S.m=addCar({lane:S.ML,z:g.dist-45,v0:g.v+7,keep:true,moto:true});S.m.behind=true;S.m.col='#d62d20'}
+  const m=S.m;if(m&&Math.abs(g.carX-m.x)<2.2&&Math.abs(m.z-g.dist)<4.5&&!S.out&&!m.hit){m.hit=1;crashNow(S,{kind:'hit',title:'CHANGED LANES INTO A MOTORCYCLE',what:'A motorcycle was passing in the next lane and you moved into it.',rule:RULE.moto});return}
   if(m&&m.z>g.dist+25&&!S.out)S.out='ok'},
- oracle(S,g,m){const mo=S.m;if(m==='crash')return{lane:mo&&mo.z-g.dist>-12&&mo.z-g.dist<-2?0:1,h:false};return{lane:mo&&mo.z>g.dist+10?0:1,h:false}}});
+ oracle(S,g,m){const mo=S.m;if(m==='crash')return{lane:mo&&mo.z-g.dist>-12&&mo.z-g.dist<-2?S.ML:S.L,h:false};return{lane:mo&&mo.z>g.dist+10?S.ML:S.L,h:false}}});
 regKind('passR',{zpre:null,sp(){return 85},
  init(S){const g=G;S.c=addCar({lane:1,z:S.az,v0:0,keep:true,draw:c=>{carRear(c.col,true,false);if(Math.floor(G.t*3)%2)ci(-.8,.7,.28,'#ffb300')}});S.c.col='#6c5ce7';
   if(S.v==='lane')S.seg=[{a:S.az-90,b:S.az+30,roles:['onc','my','my']}];else{S.seg=[{a:S.az-90,b:S.az+30,roles:['onc','my','sh']}]}S.ciRule=S.v==='lane'?RULE.passR:RULE.passSh},
@@ -2058,15 +2096,15 @@ regKind('passR',{zpre:null,sp(){return 85},
  oracle(S,g,m){const c=S.c,gap=c.z-(g.dist+NOSE);if(m==='crash')return{h:false,lane:1};if(m==='tk')return{lane:gap<40&&!c.out?2:1,h:false};
   if(S.v==='lane')return{lane:g.dist>c.z+5.5?1:(gap<45?2:1),h:false};return{lane:1,h:!c.out&&!S.turning?gap<=g.v*g.v/22+g.v*.07+6:false}}});
 regKind('lanes',{zpre:null,sp(){return 60},
- init(S){const g=G;const a=g.dist-10;needLane(1);S.sa=a;S.sb=S.az+70;divSeg(S,a,S.az+260);S.seg.push({a,b:S.sb,solidL:true});S.slow=addCar({lane:1,z:S.az,v0:g.cruise*.62,keep:true});S.ciRule=RULE.solidW},
- tgt(S,cr){return G.lane===1?followTgt(S.slow,cr,12):cr},
- onLane(S,from,l){const g=G,n=g.dist+NOSE;if((from+l===1)&&n>S.sa&&n<S.sb&&!S.out)violate(S,{title:'CROSSED A SOLID WHITE LINE',what:'You changed lanes across a solid white line.',rule:RULE.solidW});if(l===0&&n>=S.sb)S.okL=true},
+ init(S){const g=G;const a=g.dist-10;needLane();S.L=g.lane;S.sa=a;S.sb=S.az+70;divSeg(S,a,S.az+260);S.seg.push({a,b:S.sb,solidL:true});S.slow=addCar({lane:S.L,z:S.az,v0:g.cruise*.62,keep:true});S.ciRule=RULE.solidW},
+ tgt(S,cr){return G.lane===S.L?followTgt(S.slow,cr,12):cr},
+ onLane(S,from,l){const g=G,n=g.dist+NOSE;if((from+l===1)&&n>S.sa&&n<S.sb&&!S.out)violate(S,{title:'CROSSED A SOLID WHITE LINE',what:'You changed lanes across a solid white line.',rule:RULE.solidW});if(n>=S.sb)S.okL=true},   /* RH8c: any lane change after the solid stretch */
  step(S){const g=G;S.on=true;S.legit=false;if(S.okL&&g.dist>S.slow.z+6&&!S.out)S.out='ok';if(g.dist>S.seg[0].b&&!S.out)S.out='miss'},
  missMsg:'You stayed behind the slow car. Where the line is broken you may change lanes and pass.',
  props(S,dl){P(dl,6.2,S.sa+40-G.dist,()=>drawSignBoard(['DO NOT','CHANGE','LANES'],'#fff','#111'),1,0,1.5)},
- oracle(S,g,m){const n=g.dist+NOSE;if(m==='tk')return{lane:n>S.sa+30&&n<S.sb-10&&S.slow.z-g.dist<25?0:g.lane,h:false};if(n<S.sb+2)return{lane:1,h:false};return{lane:g.dist>S.slow.z+8?g.lane:0,h:false}}});
+ oracle(S,g,m){const n=g.dist+NOSE,alt=S.L===0?1:0;if(m==='tk')return{lane:n>S.sa+30&&n<S.sb-10&&S.slow.z-g.dist<25?0:g.lane,h:false};if(n<S.sb+2)return{lane:S.L,h:false};return{lane:g.dist>S.slow.z+8?g.lane:alt,h:false}}});
 regKind('lane2',{zpre:null,sp(){return 90},
- init(S){const g=G;needLane(1);if(S.v==='ends'){divSeg(S,g.dist-10,S.az+20);S.cars=[addCar({lane:0,z:g.dist+14,v0:g.cruise+2,keep:true}),addCar({lane:0,z:g.dist-30,v0:g.cruise+2,keep:true})];S.ciRule=RULE.laneEnd}
+ init(S){const g=G;needLane();if(S.v==='ends'){divSeg(S,g.dist-10,S.az+20);S.cars=[addCar({lane:0,z:g.dist+14,v0:g.cruise+2,keep:true}),addCar({lane:0,z:g.dist-30,v0:g.cruise+2,keep:true})];S.ciRule=RULE.laneEnd}
   else{S.seg=[{a:S.az,b:S.az+240,roles:['onc','my','my']}];S.slow=addCar({lane:1,z:S.az+10,v0:g.cruise*.6,keep:true,draw:slowVeh,tag:'truck'});S.ciRule=RULE.laneAdd}},
  tgt(S,cr){return S.slow&&G.lane===1?followTgt(S.slow,cr,12):cr},
  step(S){const g=G,nose=g.dist+NOSE;S.on=true;S.legit=false;
@@ -2194,7 +2232,7 @@ regKind('trouble',{zpre:null,sp(){return 60},
   if(g.carX>2.2&&g.v<.3){S.stopT+=DT;if(S.stopT>1&&!S.done){S.done=true;const onCurve=nose>S.ca&&g.dist<S.cb;
     if(!g.haz&&!S.out)violate(S,{title:'NO HAZARD LIGHTS',what:'You stopped on the shoulder without your emergency flashers.',rule:RULE.trouble});
     else if(onCurve&&!S.out)violate(S,{title:'STOPPED ON A CURVE',what:'You stopped on the shoulder in a curve where others cannot see you.',rule:RULE.trouble});
-    else if(!S.out){S.out='ok';cueGo();g.haz=false;g.lane=1}}}else S.stopT=0;
+    else if(!S.out){S.out='ok';cueGo();g.haz=false;g.pullGrace=8;g.measure={t:0,ok:true,ft:null,head:'Safe',sub:'Tap the middle lane to pull back onto the road.'}}}}else S.stopT=0;   /* RH8c: v6b moved the car to lane 1 here (g.lane=1) */
   if(nose>S.cb+120&&!S.out)S.out='miss'},
  missMsg:'Your car needed help: hazards on, pull onto the shoulder, stop.',
  ground(S,d){const a=S.ca-d,b=S.cb-d;gq(4.9,5.05,a,b,'#ffb020')},
@@ -2245,31 +2283,32 @@ regKind('merge',{zpre:null,sp(){return 210},
   if(m==='crash'){const b=g.tr.some(c=>!c.onc&&!c.out&&c.lane===1&&Math.abs(c.z-g.dist)<3);if(b)a.lane=1;return a}
   if(sigOk&&!beside&&!closing&&(m!=='tk'||g.v*MPH<38)&&nose>S.az-110)a.lane=1;
   if(m==='tk'&&nose>S.az-90&&!beside)a.lane=1;return a}});
-regKind('hov',{zpre:null,sp(){return 60},
- init(S){const g=G;fadeTraffic(true);if(g.lane===0)g.lane=1;const a=g.dist-10,b=S.az+300;S.seg=[{a,b,roles:['hov','my','my']},{a:S.az+40,b:S.az+100,hovOpen:true}];S.zb=b;S.oa=S.az+40;S.ob=S.az+100;if(S.v==='pool')g.pax=3;else g.pax=1;
+regKind('hov',{zpre:null,sp(){return 90},   /* RH8c: 90 m (was 60) so a player in lane 0 has time to read the sign and leave (the carpool lane starts 12 m before the line) */
+ init(S){const g=G;fadeTraffic(true);const a=Math.max(g.dist-10,S.az-12),b=S.az+300;   /* RH8c: v6b moved you out of lane 0 here (g.lane=1). Gone: the carpool lane starts at the sign; a player already in lane 0 is judged by step() */S.seg=[{a,b,roles:['hov','my','my']},{a:S.az+40,b:S.az+100,hovOpen:true}];S.zb=b;S.oa=S.az+40;S.ob=S.az+100;if(S.v==='pool')g.pax=3;else g.pax=1;
   for(let i=0;i<7;i++){addCar({lane:1,z:S.az-15+i*20,v0:11,keep:true});addCar({lane:2,z:S.az-5+i*20,v0:11.5,keep:true})}   /* RH7b round 2: slow traffic at 11 m/s (v6b 8): the carpool stretch took 17 s with nothing to do */S.ciRule=S.v==='pool'?RULE.hovLine:RULE.hov;S.task=S.v==='pool'?'Three people in the car':'Only you in the car'},
  tgt(S,cr){const g=G;if(g.lane===0)return cr;const l=nearestAhead(g.lane,g.dist-1);return l?followTgt(l,cr,9):cr},
  onLane(S,from,l){const g=G,n=g.dist+NOSE;if(l!==0||S.out)return;if(S.v==='alone'){violate(S,{title:'DROVE ALONE IN THE CARPOOL LANE',what:'You drove in the carpool lane with only one person in the car.',rule:RULE.hov});return}
   if(!(n>S.oa&&n<S.ob))violate(S,{title:'CROSSED THE DOUBLE WHITE LINES',what:'You entered the carpool lane across the double white lines.',rule:RULE.hovLine});else S.inHov=true},
- step(S){const g=G;S.on=true;S.legit=false;if(g.dist>S.ob+12&&!S.out){   /* RH7b round 2: judged 12 m past the opening of the carpool line (v7b first build: 50 m later, 4 s more of crawling in the jam) */if(S.v==='alone')S.out='ok';else S.out=S.inHov?'ok':'miss';g.pax=1}},
+ step(S){const g=G;S.on=true;S.legit=false;if(g.lane===0&&!S.out){if(S.v==='alone'){if(g.dist+NOSE>S.az+4)violate(S,{title:'DROVE ALONE IN THE CARPOOL LANE',what:'You drove in the carpool lane with only one person in the car.',rule:RULE.hov})}else if(g.dist+NOSE>S.oa)S.inHov=true}   /* RH8c: already in lane 0 when the carpool lane begins */if(g.dist>S.ob+12&&!S.out){   /* RH7b round 2: judged 12 m past the opening of the carpool line (v7b first build: 50 m later, 4 s more of crawling in the jam) */if(S.v==='alone')S.out='ok';else S.out=S.inHov?'ok':'miss';g.pax=1}},
  missMsg:'With three people in the car you may use the carpool lane. Enter where the double lines are broken.',
- props(S,dl){P(dl,-6.0,S.az-G.dist-30,()=>drawSignBoard(['◇ CARPOOL','2+ PERSONS','ONLY'],'#fff','#111'),1,0,1.6)},
- oracle(S,g,m){const n=g.dist+NOSE;if(S.out)return{h:false};if(S.v==='alone')return{lane:m==='tk'&&n>S.az?0:g.lane,h:false};
-  if(m==='tk')return{lane:n>S.az-20&&n<S.oa-10?0:g.lane,h:false};return{lane:n>S.oa+4&&n<S.ob-6?0:g.lane,h:false}}});
+ props(S,dl){P(dl,-6.0,S.az-G.dist-60,()=>drawSignBoard(['◇ CARPOOL','2+ PERSONS','ONLY'],'#fff','#111'),1,0,1.6)},
+ oracle(S,g,m){const n=g.dist+NOSE;if(S.out)return{h:false};const gap1=!g.tr.some(c=>!c.onc&&!c.out&&c.lane===1&&c.z-g.dist>-5&&c.z-g.dist<9),one=w=>w===0&&g.lane===2?(gap1?1:2):w;   /* one lane at a time (the traffic is in lane 1), into a gap */
+  if(S.v==='alone')return{lane:m==='tk'&&n>S.az?one(0):(g.lane===0&&m!=='tk'?1:g.lane),h:false};
+  if(m==='tk')return{lane:n>S.az-20&&n<S.oa-10?one(0):g.lane,h:false};return{lane:n>S.oa+4&&n<S.ob-6?one(0):g.lane,h:n>S.oa+4&&n<S.ob-6&&g.lane===2&&!gap1}}});   /* (from lane 2 with no gap in lane 1: brake until one opens) */
 regKind('blind',{zpre:null,sp(){return 70},
- init(S){const g=G;needLane(1);S.slow=addCar({lane:1,z:S.az,v0:g.cruise*.6,keep:true});S.bc=addCar({lane:0,z:g.dist-9,v0:g.v,keep:true});S.bc.behind=false;S.lookT=-9;S.ciRule=RULE.blind;S.task='Signal, swipe left to look, change lanes'},
+ init(S){const g=G;fadeTraffic(true);S.lane0=g.lane===0;S.L=Math.max(1,g.lane);S.slow=addCar({lane:S.L,z:S.az,v0:g.cruise*.6,keep:true});S.bc=addCar({lane:S.L-1,z:g.dist-9,v0:g.v,keep:true});   /* RH8c: the cars take their lane from yours (v6b moved you to lane 1) */S.bc.behind=false;S.lookT=-9;S.ciRule=RULE.blind;S.task='Signal, swipe left to look, change lanes'},
  onSwipe(S,dir){if(dir==='left'){S.lookT=G.runT;snd('tick')}},   /* the shoulder check: a swipe toward the lane you want shows your blind spot for 1.6 s (the mirrors do not show this car) */
  over(S,g){if(g.runT-S.lookT>1.6||S.out)return;const b=S.bc,inBS=b.z-g.dist>-16&&b.z-g.dist<5;cx.save();RR(12,150,200,74,12);cx.fillStyle='rgba(8,14,32,.9)';cx.fill();cx.lineWidth=3;cx.strokeStyle=inBS?'#ff6b6b':'#35e08a';cx.stroke();
   T('SHOULDER CHECK',112,166,13,'#ffe58a','center');cx.fillStyle='#3a404d';cx.fillRect(30,180,150,34);cx.fillStyle='#fff';cx.fillRect(30,196,150,2);cx.fillStyle='#2b7de9';cx.fillRect(120,199,30,13);if(inBS){cx.fillStyle='#e63946';cx.fillRect(120+(g.dist-b.z)*2.5-15,182,30,13)}T(inBS?'CAR IN YOUR BLIND SPOT':'CLEAR',112,220,12,inBS?'#ff9a8a':'#7dffb0','center');cx.restore()},
- tgt(S,cr){return G.lane===1?followTgt(S.slow,cr,12):cr},
- onLane(S,from,l){const g=G;if(from===1&&l===0&&!S.out&&!S.changed){S.changed=true;S.lcT=g.runT;S.lcSig=sigFor(-1,undefined,5);S.lcLook=g.runT-S.lookT<=3}},   /* judged 0.5 s later, so a crash with the car in the blind spot shows first */
+ tgt(S,cr){return G.lane===S.L?followTgt(S.slow,cr,12):cr},
+ onLane(S,from,l){const g=G;if(from===S.L&&l===S.L-1&&!S.out&&!S.changed){S.changed=true;S.lcT=g.runT;S.lcSig=sigFor(-1,undefined,5);S.lcLook=g.runT-S.lookT<=3}},   /* judged 0.5 s later, so a crash with the car in the blind spot shows first */
  step(S){const g=G,b=S.bc;S.on=true;S.legit=false;
   if(S.changed&&!S.lcDone&&g.runT-S.lcT>.5&&!S.out){S.lcDone=true;if(!S.lcSig)violate(S,{title:'NO SIGNAL FOR A LANE CHANGE',what:'You changed lanes on the freeway without signalling for 5 seconds.',rule:RULE.sigLane});else if(!S.lcLook)violate(S,{title:'NO SHOULDER CHECK',what:'You changed lanes without looking over your shoulder at the blind spot.',rule:RULE.blind})}if(S.age<4.5)b.v0=Math.max(4,g.v);else b.v0=Math.max(b.v0,g.v+3);   /* then it passes you, 3 m/s faster */
-  if(S.lcDone&&g.dist>S.slow.z+6&&!S.out)S.out='ok';if(S.age>16&&!S.out)S.out='miss'},
+  if(S.lcDone&&g.dist>S.slow.z+6&&!S.out)S.out='ok';if(S.lane0&&g.dist>S.slow.z+6&&!S.out)S.out='ok';   /* RH8c: already in the left lane: you passed the slow car without a lane change */if(S.age>16&&!S.out)S.out='miss'},
  missMsg:'Pass the slow car: wait for the blind spot to clear, signal, then change lanes.',
  oracle(S,g,m){const b=S.bc,a={h:false};if(m!=='sig')a.sig='L';if(S.changed)return{h:false};
-  if(m==='crash'){if(Math.abs(b.z-g.dist)<3)S.cgo=true;a.lane=S.cgo?0:1;return a}const clear=b.z>g.dist+10;
-  if(clear&&(m==='sig'||sigFor(-1,undefined,5.2))){if(m!=='look'&&g.runT-S.lookT>2)a.swipe='left';else a.lane=0}return a}});
+  if(m==='crash'){if(Math.abs(b.z-g.dist)<3)S.cgo=true;a.lane=S.cgo?S.L-1:S.L;return a}const clear=b.z>g.dist+10;
+  if(clear&&(m==='sig'||sigFor(-1,undefined,5.2))){if(m!=='look'&&g.runT-S.lookT>2)a.swipe='left';else a.lane=S.L-1}return a}});
 regSit({ord:100,id:'merge1',st:9,road:4,first:1,n:'Freeway on-ramp: merge',parts:[{k:'merge',v:'merge'}],u:['s6_p11_roadway-023','s6_p11_run2-019','s5-10'],bad:['tk','crash','sig']});
 regSit({ord:101,id:'hov1',st:9,road:4,n:'Carpool lane: you are alone',parts:[{k:'hov',v:'alone'}],u:['signs-052'],bad:['tk']});
 regSit({ord:102,id:'hov2',st:10,road:4,n:'Carpool lane: three in the car',parts:[{k:'hov',v:'pool'}],u:['signs-052'],bad:['tk']});
@@ -2612,7 +2651,7 @@ function drawBlindSpot(){const g=G;if(g.mode!=='run'||(g.phase!=='drive'&&g.phas
  Built from: lane-runner level generation (Subway Surfers by SYBO, Temple Run by Imangi): the free road is a series of obstacle ROWS; a row blocks one or two of
  the three lanes and never all three; rows sit a fixed reaction time apart (2.6 s in stage 1 down to 1.7 s in stage 10); coins trace the open lane, so weaving pays.
  Two-way roads have one lane your way: a row blocks it and opens a short pocket on the right (the parking lane or the shoulder, parked cars cleared) to swerve
- into; the car merges back by itself once the obstacle is behind it. Or a slow car ahead signals and turns off once you are close behind it (brake, then go).
+ into; RH8c: the car no longer merges back by itself (the player does; a LANE ENDS sign and merge arrows show the end of the lane). Or a slow car ahead signals and turns off once you are close behind it (brake, then go).
  Fair-gap rules (asserted by tests/weave.js): a static obstacle is never placed in the lane of a moving car that is still ahead of you (or coming from behind);
  at any depth at most 2 of 3 lanes are blocked; rows end 8 m before the point where the next situation spawns, so nothing is ever inside a judge zone.
  Contact = a crash with the collision report (a heart), except a pothole: -20 coins and the car slows to 55 percent (no heart). Numbers are ours, tuned by bots. */
@@ -2718,15 +2757,27 @@ function row1(row,z){const g=G,ok=[z-42,z-30,z-20,z-6,z,z+8].every(q=>{const r=r
  if((!ok||rnd()<.1)&&!live){   /* critic: mostly swerves, few slow cars to wait behind (that was the old brake-and-go) */const c=wvMover(g.road===3?'truck':'slow',1,z,row);if(c){c.turnOff=true;c.blink=1;c.sigAt=0}return}
  if(!ok)return;
  const ty=pickW(STATIC_W[g.road]||STATIC_W[2]),d=OBD[ty];addOb(ty,1,z,0);row.lanes.push(1);row.types.push(ty);row.pocket=true;
- g.wvSeg.push({a:z-30,b:z+d.len+4,roles:[roleAt(0,z),'my','my'],pf:[z-42,z+12],obZ:z,obLen:d.len});   /* the pocket opens 30 m before the obstacle; the red curb (no parked cars) starts 12 m earlier, so a player who moves over at the pocket start is never beside a parked car */if(g.wvSeg.length>12)g.wvSeg.shift();
+ g.wvSeg.push({a:z-30,b:z+d.len+4,roles:[roleAt(0,z),'my','my'],pf:[z-42,z+12],obZ:z,obLen:d.len});   /* RH8c: the car is no longer moved out of the pocket. On the two-way street the red-curb stretch is the lane (laneDrv) and it ends where parking begins; on the highway the pocket is short (about 1.5 s) and chains with the next one when rows are close: a player who stays in it past its end gets the shoulder ticket after 1.2 s (the normal obstacle outcome). (A longer pocket made a permanent extra lane on the highway: tried, reverted.) */   /* the pocket opens 30 m before the obstacle; the red curb (no parked cars) starts 12 m earlier, so a player who moves over at the pocket start is never beside a parked car */if(g.wvSeg.length>12)g.wvSeg.shift();
  wvCoins(2,z);row.coins=2}
-/* every frame: the car merges back from a pocket once the obstacle is behind it */
-function stepWeave(){const g=G;if(g.mode!=='run')return;wvLaneEnds();
- if(g.wantMid){const S=g.S;if(g.phase!=='sit'||!S||g.dist+NOSE>S.az-22||g.lane===1||g.lane!==g.wantMid-1)g.wantMid=0;   /* (wantMid = the lane you were in + 1; it ends when you or the situation move the car) */
-  else if(!g.tr.some(c=>!c.out&&!c.ghost&&!c.onc&&c.lane===1&&c.z-g.dist>-7&&c.z-g.dist<(c.ob?50:10))){g.lane=1;g.wantMid=false;if(DEV)(window.__toMid=(window.__toMid||0)+1)}}   /* a situation starts with you back in the middle lane (the lane every situation was built for) as soon as that lane is clear */if(!g.wvSeg||!g.wvSeg.length)return;if(g.phase!=='drive'&&!(g.phase==='sit'&&g.S&&!g.S.lanesOwn))return;   /* also on the approach of a situation that does not steer your lane itself */
- if(g.lane===2&&g.road!==1&&g.road!==4){for(const p of g.wvSeg)if(!p.back&&g.dist>p.obZ+p.obLen+.4&&g.dist<p.b+25){p.back=1;g.lane=1;if(DEV)(window.__backLog=window.__backLog||[]).push(+g.dist.toFixed(1));break}}}
-/* any lane that turns into parking or shoulder just ahead (a pocket or a situation's open lane ends): the car merges back into your lane by itself */
-function wvLaneEnds(){const g=G;if(g.phase!=='drive'||g.lane!==2)return;if((g.wvSeg||[]).some(p=>g.dist+NOSE>=p.a&&g.dist<=p.obZ+p.obLen+.4))return;   /* never while the pocket's obstacle is still beside you */const r=roleAt(2,g.dist+NOSE+6);if((r==='park'||r==='sh')&&roleAt(1,g.dist+NOSE+6)==='my'){g.lane=1;if(DEV)(window.__laneEndLog=window.__laneEndLog||[]).push(+g.dist.toFixed(1))}}
+/* RH8c (Kyle 10-13): the car never changes lane by itself. v7b had three automatic moves here, all removed: (1) g.wantMid (a situation start moved you to lane 1), (2) the pocket merge-back
+   (the car left the pocket lane once the obstacle was behind it), (3) wvLaneEnds (a lane that turned into parking or shoulder moved you to lane 1). A lane that ends is an obstacle like any
+   other: laneEndAhead / drawLaneEndsGround / laneEndsProps show a LANE ENDS sign and merge arrows 3 s ahead, then the parked car or the curb end is the normal outcome of staying in it. */
+function stepWeave(){}   /* (kept as an empty hook) */
+/* Is the lane L drivable at the absolute metre z? 'my', and on the two-way street the red-curb stretch of the parking lane (no parked car can stand there). */
+const laneDrv=(L,z)=>{const r=roleAt(L,z);return r==='my'||r==='ramp'||r==='hov'||r==='twl'||(L===2&&r==='park'&&G.road===2&&inRed(z))};
+/* where does the lane L end (it is drivable now and a later metre of it is parking, shoulder or bike lane)? The absolute z of the first such metre within 'span' metres of the nose, or null. */
+function laneEndAhead(L,span){const g=G,n=g.dist+NOSE;if(g.mode!=='run'||(g.phase!=='drive'&&g.phase!=='sit'))return null;if(g.S&&g.phase==='sit'&&g.S.k==='lane2')return null;   /* the lane-ends situation draws its own sign and barrels */
+ if(!laneDrv(L,n))return null;for(let d=4;d<=span;d+=3)if(!laneDrv(L,n+d))return n+d;return null}
+/* a yellow LANE ENDS sign at the roadside (3.5 s before the end, never closer than 8 m) and two white merge arrows on the lane (3.0 s and 1.8 s before the end), drawn while the lane you are in ends within 6 s */
+const LE_SPAN=v=>v*6+14;
+function drawLaneEndsGround(d){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=L===0?null:laneEndAhead(L,LE_SPAN(v));if(e===null)return;
+ const x=(L-1)*LN,z=e-d;for(const k of[0,1]){const zz=z-v*(3.0-k*1.2);if(zz<ZN+2)continue;at(x,zz,()=>{cx.save();cx.scale(1,.34);cx.fillStyle='rgba(255,255,255,.85)';cx.beginPath();cx.moveTo(0,1.6);cx.lineTo(0,-1.2);cx.lineTo(-1.3,-1.2);cx.lineTo(-1.3,-2);cx.lineTo(-2.7,-.2);cx.lineTo(-1.3,1.6);cx.lineTo(-1.3,.8);cx.lineTo(0,.8);cx.fill();cx.restore()})}}
+function laneEndsProps(dl){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=L===0?null:laneEndAhead(L,LE_SPAN(v));if(e===null)return;const z=e-v*3.5-g.dist;if(z<8)return;   /* a pocket shorter than 3.5 s has no sign: the arrows and the end of the lane are what you see */
+ P(dl,5.9,z,()=>plainBoard(['LANE','ENDS'],'#f2c200','#111'),1,0,1.5)}
+/* a roadside board of this card (LANE ENDS, 100 FT): the same shape as drawSignBoard, but not a handbook sign, so it is not part of the real-sign list (signs_real.js) */
+function plainBoard(lines,bg,fg){const n=lines.length,h=.36*n+.3,y0=2.3,w=1.5;rc(-.06,0,.12,y0,'#8a8f98');rc(-w/2,y0,w,h,'#111');rc(-w/2+.06,y0+.06,w-.12,h-.12,bg);
+ cx.save();cx.textAlign='center';cx.textBaseline='middle';cx.fillStyle=fg;cx.font='bold .3px '+FONT;const mw=Math.max(...lines.map(l=>cx.measureText(l).width)),k=Math.max(.7,Math.min(1,(w-.12)/Math.max(mw,.01)));cx.font='bold '+(.3*k).toFixed(3)+'px '+FONT;
+ lines.forEach((l,i)=>cx.fillText(l,0,-(y0+h-.15-.36*(i+.5))));cx.restore()}
 /* contact */
 function obTouch(c){const g=G;return c.z<g.dist+NOSE&&c.z+(c.len||4.4)>g.dist&&Math.abs(c.x+c.dx-g.carX)<HWC+(c.hw||1.05)}
 function bikeNear(c){const g=G,nd=c.z-(g.dist+NOSE),dx=Math.abs(c.x+c.dx-g.carX);return obTouch(c)||(dx<HWC+c.hw+.3&&g.v>c.v+.8&&nearTrig(nd,g.v-c.v))}
@@ -2811,11 +2862,12 @@ function drawWorld(){const g=G,d=g.dist;
  gq(-5.08,-4.92,-60,9999,'#e8e3d3');gq(4.92,5.08,-60,9999,'#e8e3d3');gq(-4.7,-4.55,-60,9999,g.road===2||g.road===3?'#f2c200':'#f2f2f2');gq(4.55,4.7,-60,9999,'#f2f2f2');   /* v6b: on a two-way road the left edge is the far side of the oncoming lane */
  for(const x of g.gaps)gq(-60,60,x[0]-d,x[1]-d,'#3a404d');
  drawLines(d);   /* v6b: lane lines by road type (road.js) */
- for(const S of g.scenes){const k=K[S.k];if(k.ground)k.ground(S,d)}}
+ for(const S of g.scenes){const k=K[S.k];if(k.ground)k.ground(S,d)}
+ drawLaneEndsGround(d)}   /* RH8c: merge arrows on a lane that ends */
 function polCar(t){const f=Math.floor(t*6)%2;rc(-1.05,0,.4,.45,'#111');rc(.65,0,.4,.45,'#111');rc(-1,.28,2,.72,'#1d2533');rc(-.82,.98,1.64,.55,'#1d2533');rc(-.7,1.02,1.4,.42,'#16202e');rc(-1,.28,2,.14,'#f4f4f4');
  rc(-.75,1.53,.7,.2,f?'#ff2d2d':'#701818');rc(.05,1.53,.7,.2,f?'#162a70':'#2d6bff');ci(f?-.4:.4,1.65,.9,f?'rgba(255,40,40,.3)':'rgba(40,100,255,.3)');rc(-.96,.58,.42,.2,'#b02a22');rc(.54,.58,.42,.2,'#b02a22')}
 let snapC=null;
-function drawScenes(dl){const g=G;for(const S of g.scenes){PA=Math.min(1,S.age/.4);if(S.k==='siren')PA=1;if(K[S.k].props)K[S.k].props(S,dl)}PA=1;drawWorldItems(dl);
+function drawScenes(dl){const g=G;for(const S of g.scenes){PA=Math.min(1,S.age/.4);if(S.k==='siren')PA=1;if(K[S.k].props)K[S.k].props(S,dl)}PA=1;laneEndsProps(dl);drawWorldItems(dl);
  if(g.phase==='ticket'&&g.tk){const k=g.tk,z=lerp(-15,-7.4,ease(k.t/2.2));dl.push({z,f:()=>at0(g.carX-1.1,z,()=>{cx.scale(1.15,1.15);polCar(g.t)},1)})}}
 function drawPlayer(){const g=G,k=PX*1.15;cx.save();cx.translate(CX+g.carX*PX,GY);
  cx.fillStyle='rgba(0,0,0,.3)';cx.beginPath();cx.ellipse(0,4,1.4*k,.38*k,0,0,6.3);cx.fill();
@@ -2837,9 +2889,15 @@ function arrowIcon(x,y,dir,s){cx.save();cx.translate(x,y);cx.scale(dir*s,s);cx.f
 function drawTask(){const g=G;let top=null,sub=null,dir=0;
  if(g.route){dir=g.route.dir;top=g.route.top||(dir>0?'TURN RIGHT AHEAD':'TURN LEFT AHEAD');sub=g.route.sub||(g.road>=2?(dir>0?'Signal right, then swipe right at the corner.':'Signal left, then swipe left at the corner.'):dir>0?'Right lane. Swipe right at the corner.':'Left lane. Swipe left at the corner.')}   /* v6b: custom banners (either way, U-turn); signals from the two-way street on */
  else if(g.S&&g.S.task&&g.S.on&&!g.S.out&&g.phase==='sit'){top=g.S.task.toUpperCase();sub=''}
- if(!top)return;const y=84,h=sub?60:44;cx.save();RR(14,y,362,h,14);cx.fillStyle='rgba(8,40,90,.93)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#4cc9f0';cx.stroke();
- if(dir){arrowIcon(dir>0?346:44,y+h/2,dir,1.4);fitT(top,CX,y+22,270,23,'#fff','center');fitT(sub,CX,y+44,290,15,'#bfe6ff','center')}
- else fitT(top,CX,y+h/2,340,19,'#fff','center');cx.restore()}
+ if(!top)return;const sg=g.route&&g.route.sig,y=84,h=(sub?60:44)+(sg?22:0);cx.save();RR(14,y,362,h,14);cx.fillStyle='rgba(8,40,90,.93)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#4cc9f0';cx.stroke();
+ const hh=h-(sg?22:0);
+ if(dir){arrowIcon(dir>0?346:44,y+hh/2,dir,1.4);fitT(top,CX,y+22,270,23,'#fff','center');fitT(sub,CX,y+44,290,15,'#bfe6ff','center')}
+ else fitT(top,CX,y+hh/2,340,19,'#fff','center');
+ if(sg){   /* RH8c: the bar empties as the car nears the white SIGNAL line (100 ft before the corner); it turns green when your signal is on */
+  const bx=60,bw=270,by=y+h-21,f=clamp((sg.z-g.dist)/Math.max(1,sg.z-sg.d0),0,1);cx.fillStyle='rgba(255,255,255,.2)';RR(bx,by,bw,14,7);cx.fill();
+  if(f>0.01){cx.fillStyle=sg.on?'#35e08a':'#ffd23f';RR(bx,by,Math.max(14,bw*f),14,7);cx.fill()}
+  T(f>0.01?(sg.on?'SIGNAL IS ON':'SIGNAL BEFORE THE LINE'):(sg.on?'SIGNAL IS ON':'PAST THE LINE'),CX,by+7.5,10.5,f>0.01&&!sg.on?'#10243f':'#fff','center')}
+ cx.restore()}
 function drawToast(){const g=G,tt=g.toast;if(!tt||g.phase==='crash'||g.phase==='ticket'||g.phase==='cp')return;
  const L=wrapT(tt.txt,326,19),h=16+28+L.length*23+8,a=clamp(3.2-tt.t,0,1)*clamp(tt.t*8,0,1),y=150;
  cx.save();cx.globalAlpha=a;RR(16,y,358,h,14);cx.fillStyle='rgba(60,12,16,.94)';cx.fill();cx.lineWidth=3;cx.strokeStyle='#ff6b6b';cx.stroke();
@@ -3132,6 +3190,9 @@ if(AUTO){let holding=false,swiped=null;const ev=(t,x,y)=>cv.dispatchEvent(new Po
    const ahead=tr.filter(c=>c.lane===me&&c.z-g.dist>5&&c.z-g.dist<Math.min(40,stopLim)&&c.v<v-.3);
    /* v7 (weaving): the lane with the most room ahead, nothing beside it or coming fast from behind (the same rule as the test oracle in tests/_head.js) */
    const room=L=>{let m=1e9;for(const c of tr)if(c.lane===L&&c.z-g.dist>-(c.len||4.4)-.5&&c.v<v+1.5)m=Math.min(m,c.z-g.dist);return m},near=L=>tr.some(c=>c.lane===L&&((c.z-g.dist>=-(c.len||4.4)-.5&&c.z-g.dist<=Math.max(6,v*.6+4))||(c.z-g.dist<-4.5&&c.z-g.dist>-26&&c.v>v-.5)));
+   /* RH8c: the car never changes lane by itself: the player leaves a lane that ends about 3 s ahead (the LANE ENDS sign) */
+   if(!own&&!(ph==='sit'&&S&&S.lanesOwn&&!S.out)){const span=Math.max(30,v*3),ends=L=>{for(let d=0;d<=span;d+=3){const r=roleAt(L,g.dist+NOSE+d);if(r!=='my'&&r!=='ramp'&&r!=='hov'&&r!=='twl')return true}return false};
+    if(ends(me)&&(!g.leT||g.runT-g.leT>.4)){const c2=[1,2,0].filter(L=>L!==me&&!ends(L)&&!danger(L)&&(L!==0||![g.dist+5,g.dist+20,g.dist+45].some(q=>rolesAt(q).includes('onc')||rolesAt(q).includes('twl'))));if(c2.length){g.leT=g.runT;hold(false);tap(lx(c2[0]),300);return}}}
    if(!own&&ahead.length){const cands=[0,1,2].filter(L=>L!==me&&(L!==0||![g.dist+5,g.dist+20,g.dist+45].some(q=>rolesAt(q).includes('onc')||rolesAt(q).includes('twl')))&&roleAt(L,g.dist+20)==='my'&&!near(L)&&room(L)>room(me)+6&&(Math.abs(L-me)<2||(!near(1)&&room(1)>9))).sort((a,b)=>(room(b)-room(a))||(Math.abs(a-me)-Math.abs(b-me)));if(cands.length){hold(false);tap(lx(cands[0]),300);return}if(ahead[0].z-g.dist<24){hold(true);return}}}
   if(ph!=='sit'||!g.S){hold(false);swiped=null;return}
   const a=oracleAct(g,Q.get('mist'));if(a.lane!==undefined&&a.lane!==g.lane){hold(false);tap(lx(a.lane),300)}

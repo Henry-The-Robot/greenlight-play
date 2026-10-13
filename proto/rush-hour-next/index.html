@@ -1669,7 +1669,7 @@ K.turn={init(S){const g=G,left=S.v==='left';S.dir=left?-1:1;S.need=left?0:2;S.zL
   if(S.light){const f=()=>{signal(S.light==='r'?'r':'g',S.age);if(S.light==='a'){cx.save();cx.translate(0,6.55);cx.fillStyle='#fff';cx.beginPath();cx.moveTo(.3,0);cx.lineTo(-.25,0);cx.lineTo(-.25,.22);cx.lineTo(-.6,-.1);cx.lineTo(-.25,-.42);cx.lineTo(-.25,-.2);cx.lineTo(.3,-.2);cx.fill();cx.restore()}};
    P(dl,5.4,z+7,f,1,0,.9);P(dl,-5.4,z+7,f,1,0,.9)}
   if(T_&&T_.props)T_.props(S,dl,z);
-  if(S.sigZ!==undefined&&!S.exec&&turnNeedsSig(S)&&S.sigZ-G.dist>1)P(dl,5.9,S.sigZ-G.dist,()=>drawSignBoard(['100 FT'],'#fff','#111'),1,0,1.3);   /* RH8c: the 100 FT sign at the side of the road, at the SIGNAL line */
+  if(S.sigZ!==undefined&&!S.exec&&turnNeedsSig(S)&&S.sigZ-G.dist>1)P(dl,5.9,S.sigZ-G.dist,()=>plainBoard(['100 FT'],'#fff','#111'),1,0,1.3);   /* RH8c: the 100 FT sign at the side of the road, at the SIGNAL line */
   if(S.v==='ped'){const wz=S.az-G.dist;P(dl,5.9,wz-38,()=>signPole('ped'),1,0,1.4)}
   if(S.w&&!S.w.done){const w=S.w;   /* v6: the person is big (scale 2.0), hi-vis yellow with a white halo, and stands at the corner from the start; a red mark shows above while they wait */
    P(dl,w.x,w.z-G.dist,()=>{ci(0,1.0,1.35,'rgba(255,255,255,'+(.3+.12*Math.sin(G.t*7)).toFixed(3)+')');person('#ffe600',w.t,w.walk?1:0,'#ff6a00',1);
@@ -2294,7 +2294,7 @@ regKind('hov',{zpre:null,sp(){return 90},   /* RH8c: 90 m (was 60) so a player i
  props(S,dl){P(dl,-6.0,S.az-G.dist-60,()=>drawSignBoard(['◇ CARPOOL','2+ PERSONS','ONLY'],'#fff','#111'),1,0,1.6)},
  oracle(S,g,m){const n=g.dist+NOSE;if(S.out)return{h:false};const gap1=!g.tr.some(c=>!c.onc&&!c.out&&c.lane===1&&c.z-g.dist>-5&&c.z-g.dist<9),one=w=>w===0&&g.lane===2?(gap1?1:2):w;   /* one lane at a time (the traffic is in lane 1), into a gap */
   if(S.v==='alone')return{lane:m==='tk'&&n>S.az?one(0):(g.lane===0&&m!=='tk'?1:g.lane),h:false};
-  if(m==='tk')return{lane:n>S.az-20&&n<S.oa-10?one(0):g.lane,h:false};return{lane:n>S.oa+4&&n<S.ob-6?one(0):g.lane,h:false}}});
+  if(m==='tk')return{lane:n>S.az-20&&n<S.oa-10?one(0):g.lane,h:false};return{lane:n>S.oa+4&&n<S.ob-6?one(0):g.lane,h:n>S.oa+4&&n<S.ob-6&&g.lane===2&&!gap1}}});   /* (from lane 2 with no gap in lane 1: brake until one opens) */
 regKind('blind',{zpre:null,sp(){return 70},
  init(S){const g=G;fadeTraffic(true);S.lane0=g.lane===0;S.L=Math.max(1,g.lane);S.slow=addCar({lane:S.L,z:S.az,v0:g.cruise*.6,keep:true});S.bc=addCar({lane:S.L-1,z:g.dist-9,v0:g.v,keep:true});   /* RH8c: the cars take their lane from yours (v6b moved you to lane 1) */S.bc.behind=false;S.lookT=-9;S.ciRule=RULE.blind;S.task='Signal, swipe left to look, change lanes'},
  onSwipe(S,dir){if(dir==='left'){S.lookT=G.runT;snd('tick')}},   /* the shoulder check: a swipe toward the lane you want shows your blind spot for 1.6 s (the mirrors do not show this car) */
@@ -2773,7 +2773,11 @@ const LE_SPAN=v=>v*6+14;
 function drawLaneEndsGround(d){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=L===0?null:laneEndAhead(L,LE_SPAN(v));if(e===null)return;
  const x=(L-1)*LN,z=e-d;for(const k of[0,1]){const zz=z-v*(3.0-k*1.2);if(zz<ZN+2)continue;at(x,zz,()=>{cx.save();cx.scale(1,.34);cx.fillStyle='rgba(255,255,255,.85)';cx.beginPath();cx.moveTo(0,1.6);cx.lineTo(0,-1.2);cx.lineTo(-1.3,-1.2);cx.lineTo(-1.3,-2);cx.lineTo(-2.7,-.2);cx.lineTo(-1.3,1.6);cx.lineTo(-1.3,.8);cx.lineTo(0,.8);cx.fill();cx.restore()})}}
 function laneEndsProps(dl){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=L===0?null:laneEndAhead(L,LE_SPAN(v));if(e===null)return;const z=e-v*3.5-g.dist;if(z<8)return;   /* a pocket shorter than 3.5 s has no sign: the arrows and the end of the lane are what you see */
- P(dl,5.9,z,()=>drawSignBoard(['LANE','ENDS'],'#f2c200','#111'),1,0,1.5)}
+ P(dl,5.9,z,()=>plainBoard(['LANE','ENDS'],'#f2c200','#111'),1,0,1.5)}
+/* a roadside board of this card (LANE ENDS, 100 FT): the same shape as drawSignBoard, but not a handbook sign, so it is not part of the real-sign list (signs_real.js) */
+function plainBoard(lines,bg,fg){const n=lines.length,h=.36*n+.3,y0=2.3,w=1.5;rc(-.06,0,.12,y0,'#8a8f98');rc(-w/2,y0,w,h,'#111');rc(-w/2+.06,y0+.06,w-.12,h-.12,bg);
+ cx.save();cx.textAlign='center';cx.textBaseline='middle';cx.fillStyle=fg;cx.font='bold .3px '+FONT;const mw=Math.max(...lines.map(l=>cx.measureText(l).width)),k=Math.max(.7,Math.min(1,(w-.12)/Math.max(mw,.01)));cx.font='bold '+(.3*k).toFixed(3)+'px '+FONT;
+ lines.forEach((l,i)=>cx.fillText(l,0,-(y0+h-.15-.36*(i+.5))));cx.restore()}
 /* contact */
 function obTouch(c){const g=G;return c.z<g.dist+NOSE&&c.z+(c.len||4.4)>g.dist&&Math.abs(c.x+c.dx-g.carX)<HWC+(c.hw||1.05)}
 function bikeNear(c){const g=G,nd=c.z-(g.dist+NOSE),dx=Math.abs(c.x+c.dx-g.carX);return obTouch(c)||(dx<HWC+c.hw+.3&&g.v>c.v+.8&&nearTrig(nd,g.v-c.v))}

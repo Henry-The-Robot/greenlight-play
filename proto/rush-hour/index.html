@@ -986,8 +986,8 @@ function addRule(key,text,cvc){RULE[key]=text;if(cvc)CVC[text]=cvc;return text}
  Global lane rules on two-way roads: crossing a solid yellow line = ticket; more than 8 s on the left side = ticket; an oncoming car = head-on crash; a parked car = crash; the shoulder = ticket.
  Built from: the California Driver Handbook "Pavement markings" pages (line meanings), the pseudo-3D road of Jake Gordon's javascript-racer (lines as ground quads per segment),
  Mario Kart / Burnout style dash buttons (signal and light stalks as on-screen buttons that appear only when the road needs them). Numbers are ours, tuned by bots. */
-const ROADS={1:{n:'One-way street',sub:'Parking on both sides',roles:['my','my','my'],cl:null},
- 2:{n:'Two-way street',sub:'Yellow centre line. Parked cars on the right.',roles:['onc','my','park'],cl:'double'},
+const ROADS={1:{n:'One-way street',sub:'Parking on both sides. 35 mph.',roles:['my','my','my'],cl:null},
+ 2:{n:'Two-way street',sub:'Yellow centre line. Parked cars right. 40 mph.',roles:['onc','my','park'],cl:'double'},
  3:{n:'Highway',sub:'Passing zones and a shoulder. 55 mph.',roles:['onc','my','sh'],cl:'auto'},
  4:{n:'Freeway',sub:'Merge, exit, carpool lane. 65 mph.',roles:['my','my','my'],cl:null}};
 const NROAD=4,MPH=2.237;
@@ -1054,10 +1054,11 @@ function genOnc(){const g=G;if(g.noWorld||g.mode!=='run'||(g.phase!=='drive'&&g.
 function laneVio(o){const g=G;if(g.pend||g.mode!=='run')return;if(DEV)(window.__laneLog=window.__laneLog||[]).push({t:o.title,x:+g.carX.toFixed(2),lane:g.lane,ph:g.phase,k:g.S&&g.S.k,out:g.S&&g.S.out,roles:rolesAt(g.dist+NOSE).join(),cl:clAt(g.dist+NOSE),lr:g.lr&&g.lr.prev});if(g.phase==='sit'&&g.S&&!g.S.out){violate(g.S,o);return}if(g.phase!=='drive')return;const S={out:null,k:'_road'};violate(S,o);startTicket()}
 function stepLaneRules(){const g=G;if(g.mode!=='run'||(g.phase!=='drive'&&g.phase!=='sit')){g.lr=null;return}
  const own=g.phase==='sit'&&g.S&&g.S.lanesOwn&&!g.S.out,z=g.dist+NOSE,ro=rolesAt(z),l=g.carX<-1.6?0:g.carX>1.6?2:1,role=ro[l];g.lr=g.lr||{prev:'my',t:0,z0:0};const lr=g.lr;
- if(role!==lr.prev){if(role==='onc'&&!own&&!passable(clAt(z))&&lr.prev!=='onc')laneVio({title:'CROSSED A SOLID YELLOW LINE',what:'You crossed a solid yellow centre line into the oncoming lane.',rule:RULE.passSolid});lr.under=lr.pl===l&&lr.prev==='my'&&role==='sh';lr.prev=role;lr.t=0;lr.z0=g.dist}   /* RH8c: lr.under = the road changed under you (a pocket lane ended while you stayed in it): the shoulder ticket waits 3 s, not 1.2 s (the car is no longer moved out of the pocket) */
+ if(role!==lr.prev){const byRoad=role==='onc'&&lr.prev!=='onc'&&lr.pl===l;   /* RH8d: the lane index did not change, the ROAD did (a divided stretch ended and its left lane became the oncoming lane under a player who passed in it): not a crossing, no ticket in that frame (RH8c2 open item 1: the unexplained yellow-line ticket) */
+  if(role==='onc'&&!own&&!passable(clAt(z))&&lr.prev!=='onc'&&!byRoad)laneVio({title:'CROSSED A SOLID YELLOW LINE',what:'You crossed a solid yellow centre line into the oncoming lane.',rule:RULE.passSolid});lr.underOnc=byRoad;lr.under=lr.pl===l&&lr.prev==='my'&&role==='sh';lr.prev=role;lr.t=0;lr.z0=g.dist}   /* RH8c: lr.under = the road changed under you (a pocket lane ended while you stayed in it): the shoulder ticket waits 3 s, not 1.2 s (the car is no longer moved out of the pocket) */
  lr.pl=l;lr.t+=DT;
  if(own)return;
- if(role==='onc'&&lr.t>8)laneVio({title:'DROVE ON THE LEFT SIDE',what:'You stayed in the oncoming lane for a long time.',rule:RULE.leftSide});
+ if(role==='onc'&&lr.t>(lr.underOnc?3:8))laneVio({title:'DROVE ON THE LEFT SIDE',what:'You stayed in the oncoming lane for a long time.',rule:RULE.leftSide});
  if(g.pullGrace>0)g.pullGrace-=DT;   /* RH8c: after parking or engine trouble you pull out yourself; the shoulder ticket waits 8 s */
  if(role==='sh'&&lr.t>(lr.under?3.0:1.2)&&g.v>2&&!(g.pullGrace>0))laneVio({title:'DROVE ON THE SHOULDER',what:'You drove over the white edge line onto the shoulder.',rule:RULE.edge})}
 /* ---------- the speedometer (mph) and the posted limit ---------- */
@@ -1071,7 +1072,7 @@ function drawSpeedo(){const g=G;if(g.mode!=='run'||!['drive','sit','turn','ticke
 const DASH={L:{x:6,w:70},R:{x:314,w:70},C:{x:146,w:98},h:50};
 const dashY=()=>H-56;
 const dashOn=()=>{const g=G;return g.mode==='run'&&(g.phase==='drive'||g.phase==='sit')&&g.road>=2};
-function ctxBtn(){const g=G,S=g.S;if(g.phase==='sit'&&S&&!S.out&&S.hazBtn)return'hazard';if(g.dark>.05||g.rain>.05||(S&&S.needLights))return'lights';return null}
+function ctxBtn(){const g=G,S=g.S;if(g.phase==='sit'&&S&&!S.out&&S.hazBtn)return'hazard';if(g.haz&&g.hazRem)return'hazard';   /* RH8d: the HAZARD button stays while the 3 s reminder runs */if(g.dark>.05||g.rain>.05||(S&&S.needLights))return'lights';return null}
 const LIGHTN=['OFF','PARK','LOW','HIGH'];
 function dashHit(x,y){if(!dashOn()||y<dashY()||y>dashY()+DASH.h)return null;if(x>=DASH.L.x&&x<=DASH.L.x+DASH.L.w)return'L';if(x>=DASH.R.x&&x<=DASH.R.x+DASH.R.w)return'R';const c=ctxBtn();if(c&&x>=DASH.C.x&&x<=DASH.C.x+DASH.C.w)return c;return null}
 function dashPress(b){const g=G;snd('tick');
@@ -1123,7 +1124,7 @@ const flash=(col,a)=>{G.flash={col,a}};
 const addCoins=n=>{const g=G,b=g.coins;g.coins=Math.max(0,b+n);return g.coins-b};   /* score only (Kyle 10-11): coins never go below 0; a ticket or crash takes what is there. Returns the change. */
 const addGap=(a,b)=>{G.gaps.push([a,b]);G.gaps=G.gaps.filter(x=>x[1]>G.dist-80)};
 const cueGo=()=>{G.cue={t:0};snd('go')};
-function cruiseNow(){const g=G;return Math.min(g.road===4?28.6:g.road===3?24.4:30,lvSpeed(g.stage)+lvCreep(g.stT))*(.85+.15*clamp(g.stT/3,0,1))}   /* v6: speed rises through a stage and from stage to stage; v7: a stage starts at 85 percent and is at full speed after 3 s (v6: 60 percent, 9 s) */
+function cruiseNow(){const g=G;return Math.min(ROAD_CAP[g.road]||ROAD_CAP[1],lvSpeed(g.stage)+lvCreep(g.stT))*(.85+.15*clamp(g.stT/3,0,1))}   /* RH8d2: the cap is the road's posted limit (rh8d.js ROAD_CAP; v8d: 30 on roads 1 and 2 = 67 mph, held down only by the limit cap) */   /* v6: speed rises through a stage and from stage to stage; v7: a stage starts at 85 percent and is at full speed after 3 s (v6: 60 percent, 9 s) */
 /* ---------- run, stages, the queue ---------- */
 const QRND=(DEV&&Q.get('seed'))?mul(+Q.get('seed')):rnd;   /* ?dev=1&seed=N makes the order inside a stage repeat (tests) */
 const MOP=9;   /* (stages 1 to 3 have 8; the v5 spec says 8 to 10 per checkpoint; longer stages keep the road share up now that the rounds take longer) after stage 3 every stage is MOP situations: the unpassed ones first, then a refresher of passed ones while test questions are still open */
@@ -1148,7 +1149,7 @@ function startStage(s,first,restore){const g=G;
  g.lastStage=g.starts.filter(x=>x.stage===s-1).map(x=>x.id);
  for(let k=0;k<24;k++){g.queue=buildQueue(s);if(g.queue.length||winReady())break;s++}
  if(winReady()&&!g.queue.length){winGame();return}
- const prevRoad=g.road;g.road=QROAD;if(g.road!==prevRoad||first){g.lane=1;g.xo=null}   /* v7: a new road starts in your own lane (weaving can end a stage in any lane; lane 0 of a two-way street is the oncoming lane) */g.darkT=0;g.rainT=0;g.limit=0;g.sig=null;g.haz=false;g.pax=1;g.lr=null;
+ const prevRoad=g.road;g.road=QROAD;if(g.road!==prevRoad||first){g.lane=1;g.xo=null}   /* v7: a new road starts in your own lane (weaving can end a stage in any lane; lane 0 of a two-way street is the oncoming lane) */g.darkT=0;g.rainT=0;lsgReset();g.sig=null;g.haz=false;g.hazT=0;g.hazRem=false;   /* RH8d: the HUD limit starts as the posted limit of the road (a sign stands 70 m ahead) */g.pax=1;g.lr=null;
  g.stage=s;g.stT=0;g.scenes=[];g.gaps=[];g.S=null;g.cur=null;g.pend=null;g.cc=null;g.tk=null;g.tn=null;BEND=0;g.cam=0;g.measure=null;g.toast=null;g.cue=null;g.route=null;g.cruise=cruiseNow();
  clearWorld();g.phase='drive';g.pt=0;g.idleT=0;g.honked=false;setGap(first?3.7:restore?3.8:4.2);   /* v7: a weave row first (within 3 s of the tap), then the first situation (its zone within 6 s); v6 1.6 / 2.2 / 1.8 */
  if(restore)g.banner={t:0,l1:s>1?'CHECKPOINT '+(s-1):'BACK AT THE START',l2:'Passed situations stay passed',l3:g.queue.length+' to go in this stage'};
@@ -1705,7 +1706,7 @@ const TURN_J=.5,TURN_T=1.15,TURN_B=.85,smooth=u=>{u=clamp(u,0,1);return u*u*(3-2
 function turnBend(n){return n.t<TURN_J?smooth(n.t/TURN_J):1-smooth((n.t-TURN_J)/(TURN_T-TURN_J))}
 function turnFade(n){return .92*(n.t<TURN_J?clamp((n.t-(TURN_J-.14))/.14,0,1):1-clamp((n.t-TURN_J)/.4,0,1))}
 function stepTurn(){const g=G,n=g.tn;n.t+=DT;
- if(!n.jumped&&n.t>=TURN_J){n.jumped=true;g.dist+=4000;g.pd=g.dist;g.scenes=[];g.gaps=[];clearWorld();g.xo=null;g.lane=ROADS[g.road].roles.every(r=>r==='my')?(n.dir>0?2:0):1;g.carX=(g.lane-1)*LN}   /* v6b: on a two-way road you come out in your own lane */
+ if(!n.jumped&&n.t>=TURN_J){n.jumped=true;g.dist+=4000;g.pd=g.dist;g.scenes=[];g.gaps=[];clearWorld();lsgReset();/* RH8d: a new street: its posted limit again, with a sign 30 m ahead */g.xo=null;g.lane=ROADS[g.road].roles.every(r=>r==='my')?(n.dir>0?2:0):1;g.carX=(g.lane-1)*LN}   /* v6b: on a two-way road you come out in your own lane */
  const b=turnBend(n);BEND=n.dir*TURN_B*b;g.yaw=n.dir*.45*b;
  if(n.t>=TURN_T){g.yaw=0;BEND=0;const S=n.S;g.tn=null;g.phase='sit';if(!S.out){S.out='ok'}}
  return Math.min(g.cruise,8)}
@@ -1745,7 +1746,7 @@ function slowVeh(c){if(c.tag==='farm'){rc(-1.2,0,.6,1.1,'#222');rc(.6,0,.6,1.1,'
  else{rc(-1.25,0,.5,.55,'#111');rc(.75,0,.5,.55,'#111');rc(-1.3,.4,2.6,2.6,'#e9e2cf');rc(-1.3,.4,2.6,.25,'#666');rc(-1.2,.55,.35,.22,'#b02a22');rc(.85,.55,.35,.22,'#b02a22');cx.save();cx.font='bold .3px '+FONT;cx.textAlign='center';cx.fillStyle='#555';cx.fillText('DELIVERY',0,-1.9);cx.restore()}}
 function pennant(){rc(-.06,0,.12,2.4,'#8a8f98');pg([[0,3.4],[0,2.4],[1.7,2.9]],'#111');pg([[.07,3.3],[.07,2.5],[1.5,2.9]],'#f2c200');cx.save();cx.fillStyle='#111';cx.font='bold .16px '+FONT;cx.fillText('NO',.15,-3.02);cx.fillText('PASSING',.15,-2.84);cx.fillText('ZONE',.15,-2.66);cx.restore()}
 const PASSV={broken:{cl:'broken',must:1,fl:[.3,1.5,10.5,11.7,12.9]},farm:{cl:'broken',must:1,farm:1,fl:[.3,1.5,10.5,11.7,12.9]},mixed:{cl:'bs',cl2:'sb',must:1,fl:[.3,1.5,12,13.2,14.4]},
- double:{cl:'double',fl:[.5,3,5.5,8,10.5,13]},pennant:{cl:'solid',fl:[.5,3,5.5,8,10.5,13]},junction:{cl:'broken',junc:1,fl:[.5,6,12]}};
+ double:{cl:'double',fl:[.5,3,5.5,8,10.5,13]},pennant:{cl:'solid',fl:[.5,3,5.5,8,10.5,13]},junction:{cl:'broken',junc:1,fl:[2.5,7.5,13]}};   /* RH8d2: the first oncoming car came 0.5 s after the start and met a player who passes at the new two-way street cruise (40 mph, 17.7 m/s) 0.4 m BEFORE the "near an intersection" line opened: a head-on crash instead of the ticket this situation teaches. 2.5 s later it meets him after the line (the cruise on road 2 was 21 m/s before RH8d2). */
 regKind('pass',{zpre:null,sp(){return 64},
  init(S){const g=G,V=PASSV[S.v];S.V=V;S.L=g.road>=3?300:240;   /* (a shorter "never pass" variant, 170 m, ended before the oncoming gap the mistake test needs: reverted) */S.zEnd=S.az+S.L;S.mid=S.az+90;S.noOnc=true;for(const c of g.tr)if(c.onc)c.out=true;
   S.seg=V.cl2?[{a:g.dist-30,b:S.mid,cl:V.cl},{a:S.mid,b:S.zEnd+40,cl:V.cl2}]:[{a:g.dist-30,b:S.zEnd+40,cl:V.cl}];
@@ -1788,31 +1789,37 @@ addRule('basic','California\'s Basic Speed Law requires you to never drive faste
 addRule('school15','A school zone limit can be as low as 15 mph when children are present; obey the posted limit.','22358.4');
 addRule('work','In a work zone where road crews are working, driving over the posted speed limit is presumed to break the basic speed law.','22350');
 const SPV={res25:{lim:25,sign:['SPEED','LIMIT','25'],rule:'res25',L:135},school25:{lim:25,sign:['SCHOOL','SPEED','LIMIT 25'],rule:'school25',L:135,kids:1},alley15:{lim:15,sign:['ALLEY','SPEED','LIMIT 15'],rule:'alley15',L:95},
- hwy55:{lim:55,sign:['SPEED','LIMIT','55'],rule:'hwy55',L:330},fwy65:{lim:65,sign:['SPEED','LIMIT','65'],rule:'fwy65',L:380},fog:{lim:40,post:65,sign:['FOG','SAFE','40 MPH'],rule:'basic',L:330,fog:1},
+ hwy55:{lim:55,sign:['SPEED','LIMIT','55'],rule:'hwy55',L:330,pre:65,SP:140},fwy65:{lim:65,sign:['SPEED','LIMIT','65'],rule:'fwy65',L:380,pre:70,SP:165},fog:{lim:40,sign:['FOG','SAFE','40 MPH'],rule:'basic',L:330,fog:1},
  school15:{lim:15,sign:['SCHOOL','LIMIT 15','WHEN','CHILDREN'],rule:'school15',L:95,kids:1},work:{lim:45,sign:['WORK ZONE','SPEED','LIMIT 45'],rule:'work',L:300,work:1}};
-regKind('speed',{zpre:null,dec:6,sp(){return 70},
- init(S){const V=SPV[S.v];S.V=V;S.z0=S.az;S.oz=S.az+V.L;S.set=null;S.ciRule=RULE[V.rule];S.lanesOwn=false},
- tgt(S,cr){const g=G,V=S.V,inZ=g.dist+NOSE>S.z0-25;if(!inZ)return cr;const push=(V.lim+8)/MPH;if(S.set!==null)return Math.min(S.set,push);return Math.max(Math.min(cr,push),push)},
- step(S){const g=G,V=S.V,nose=g.dist+NOSE;S.on=true;S.legit=false;if(nose>S.z0-25&&nose<S.oz+10){g.limit=V.post&&nose<S.z0+20?V.post:V.lim;g.limitAdv=!!(V.fog&&nose>=S.z0+20)}
-  if(V.fog)g.fog=clamp((nose-S.z0+60)/60,0,1)*(nose<S.oz+30?1:0);
+regKind('speed',{zpre:null,dec:6,sp(i){const c=G.cur;const V=c&&c.sit.parts[i]?SPV[c.sit.parts[i].v]:null;return V&&V.SP||70},   /* RH8d2: a zone that drops from a higher limit spawns further ahead: a stretch at the higher limit, then the sign (read time 2 s + 1.5 s before it) */
+ init(S){const V=SPV[S.v];S.V=V;S.z0=S.az;S.oz=S.az+V.L;S.set=null;S.ciRule=RULE[V.rule];S.lanesOwn=false;
+  /* RH8d: the HUD limit follows the SIGNS (rh8d.js): the zone sign at z0-18 (the HUD changes when the nose passes it), the road limit again at the end sign (oz+25). A zone at the road limit has no push.
+     RH8d2: highway 55 and freeway 65 can be failed: V.pre = the higher limit posted just before (a sign 45 m ahead of the spawn point: 65 before the highway sign, 70 before the freeway sign, both real California limits);
+     the traffic runs at pre-1 mph, the sign drops to the zone limit, the player must brake to it before the officer (a ticket for the speed there). */
+  S.low=V.lim<Math.max(roadLim(),V.pre||0);if(V.pre){S.pz=G.dist+NOSE+40;lsgAdd(S.pz,V.pre,limBoard(V.pre),'#fff',false,false)}
+  lsgZone(S.z0-18,V.lim,V.sign,V.fog||V.work?'#ff9a1a':V.kids?'#c6f432':'#fff',!!V.fog,S.oz+25);if(V.fog)G.fogZ=[S.z0-60,S.oz+30]},
+ tgt(S,cr){const g=G,V=S.V,n=g.dist+NOSE;
+  if(V.pre&&n>S.pz&&n<=S.z0-18){const t=(V.pre-1)/MPH;return S.set!==null?Math.min(S.set,t):t}   /* the stretch at the higher limit: the traffic runs at pre - 1 mph */
+  if(n<=S.z0-18||!S.low)return cr;const push=(V.pre?V.pre-1:V.lim+8)/MPH;if(S.set!==null)return Math.min(S.set,push);return Math.max(Math.min(cr,push),push)},   /* RH8d: the push starts at the sign (v8c: 7 m before it) and only in a zone LOWER than the road limit (RH8d2: or than the limit just before it: the traffic keeps its speed) */
+ step(S){const g=G,V=S.V,nose=g.dist+NOSE;S.on=true;S.legit=false;
   if(g.braking)S.wasB=true;else if(S.wasB){S.wasB=false;S.set=g.v}   /* let go after a hold: the car keeps this speed */
   if(nose>S.oz&&!S.judged){S.judged=true;const mph=Math.round(g.v*MPH);if(mph>V.lim&&V.fog&&!S.out){S.out='miss';S.fogMph=mph}else if(mph>V.lim)violate(S,{title:'SPEEDING: '+mph+' IN A '+V.lim+' ZONE',what:'The officer measured '+mph+' mph where the limit was '+V.lim+' mph.',rule:RULE[V.rule]})}
-  if(nose>S.oz+25&&!S.out){S.out='ok';g.limit=0;g.limitAdv=false;g.fog=0}},
+  if(nose>S.oz+25&&!S.out)S.out='ok'},   /* (v8c also reset g.limit and g.fog here, and only when no ticket had set S.out: the stuck 45. RH8d: the sign list does it, rh8d.js) */
  zl(S){return[S.oz-45,S.oz+35]},   /* RH7b round 2: the judge needs a quiet road for the last 45 m before the officer; before that, weave rows (K.speed.wv) keep you busy */
  wv(S){return S.oz-55},   /* 10 m more than zl: a row is up to 6.5 m long and a pocket may slide it */
- get missMsg(){return 'Too fast for the fog. The posted 65 is for clear weather: the basic speed law says slow to a safe speed (the sign advised 40).'},
+ get missMsg(){return 'Too fast for the fog. The sign advised 40: the basic speed law says slow to a safe speed, even when the road limit is higher.'},   /* RH8d: the highway posts 55, not 65 */
  ground(S,d){},
- props(S,dl){const z=S.z0-G.dist,V=S.V;P(dl,5.5,z-18,()=>drawSignBoard(V.sign,V.fog||V.work?'#ff9a1a':V.kids?'#c6f432':'#fff','#111'),1,0,1.9);
+ props(S,dl){const z=S.z0-G.dist,V=S.V;   /* (the zone sign and the end sign are drawn from the sign list: rh8d.js drawLimitSigns) */
   if(V.kids)for(let i=0;i<4;i++)P(dl,6.4+(i%2)*.8,z+20+i*14,()=>person(['#e84393','#3498db','#ffb020','#2ecc71'][i],G.t+i,1,'#222',.8),1,0,1.4);
   if(V.work)for(let i=0;i<6;i++)P(dl,5.3,z+10+i*40,()=>cone(0),1,0,1.4);
   const oz=S.oz-G.dist;P(dl,6.6,oz,()=>{cx.scale(-1,1);polCar(G.t*0)},1,0,1.15);P(dl,6.0,oz+1,()=>{person('#1d3a7a',0,0,'#111',1);rc(.25,1.2,.35,.15,'#333')},1,0,1.4)},
- oracle(S,g,m){if(m==='tk'||m==='miss')return{h:false};const nose=g.dist+NOSE,mph=g.v*MPH,inZ=nose>S.z0-30;return{h:inZ&&mph>S.V.lim-1.5}}});
+ oracle(S,g,m){if(m==='tk'||m==='miss')return{h:false};const nose=g.dist+NOSE,mph=g.v*MPH,inZ=S.V.pre?nose>S.z0-18+.8*g.v:nose>S.z0-30;return{h:inZ&&mph>S.V.lim-1.5}}});   /* (the drop zones: the oracle reads the sign, then brakes after 0.8 s) */
 regSit({ord:45,id:'spd1',st:4,road:2,n:'Residential speed limit 25',parts:[{k:'speed',v:'res25'}],u:['s7_p11_run2-015','signs-008'],bad:['tk']});
 regSit({ord:46,id:'spd2',st:5,road:2,n:'School zone 25',parts:[{k:'speed',v:'school25'}],u:['s7_p11_roadway-003'],bad:['tk']});
 regSit({ord:47,id:'spd3',st:6,road:2,n:'Alley 15',parts:[{k:'speed',v:'alley15'}],u:['s7_p11_run2-017'],bad:['tk']});
-regSit({ord:72,id:'spd4',st:7,road:3,n:'Highway speed limit 55',parts:[{k:'speed',v:'hwy55'}],u:['s8c-003'],bad:['tk']});
+regSit({ord:72,id:'spd4',st:7,road:3,n:'Highway speed limit 55',parts:[{k:'speed',v:'hwy55'}],u:['s8c-003'],bad:['tk'],tkt:'SPEEDING'});   /* RH8d2: the ticket path is back: the road before posts 65, the sign drops to 55 (RH8d had bad:[] because the car no longer sped up by itself) */
 regSit({ord:73,id:'spd5',st:8,road:3,n:'Fog: slow to a safe speed',parts:[{k:'speed',v:'fog'}],u:['s8c-001'],bad:['miss']});
-regSit({ord:90,id:'spd6',st:9,road:4,n:'Freeway speed limit 65',parts:[{k:'speed',v:'fwy65'}],u:['s8c-002','signs-008'],bad:['tk']});
+regSit({ord:90,id:'spd6',st:9,road:4,n:'Freeway speed limit 65',parts:[{k:'speed',v:'fwy65'}],u:['s8c-002','signs-008'],bad:['tk'],tkt:'SPEEDING'});   /* RH8d2: as spd4 (70 before, then 65) */
 regSit({ord:200,id:'xspd1',st:5,road:2,x:1,n:'School zone 15 (extra)',parts:[{k:'speed',v:'school15'}],u:['s7_p11_run3-010'],bad:['tk']});
 regSit({ord:201,id:'xspd2',st:7,road:3,x:1,n:'Work zone 45 (extra)',parts:[{k:'speed',v:'work'}],u:['s7_p11_roadway-011'],bad:['tk']});
 /* FLASHING and DARK signals (two-way street): flashred = stop at the line as at a stop sign, then go; dark = the signal is out: stop, a car crosses first, then go;
@@ -2067,17 +2074,17 @@ regKind('tail',{zpre:null,sp(){return 40},
  over(S,g){const c=S.c,gp=g.dist-c.z;if(gp>0&&gp<30&&g.lane===c.lane&&Math.floor(g.t*4)%2){cx.save();cx.globalAlpha=.35;cx.fillStyle='#fffbe0';cx.fillRect(0,H-150,W,150);cx.restore();T('A car is tailgating you',CX,H-170,15,'#fff','center',3)}},
  oracle(S,g,m){if(m==='crash')return{h:S.c.z>g.dist-16&&g.lane===S.L};const R=S.L<2?S.L+1:S.L-1,aheadR=g.tr.some(o=>!o.onc&&o.lane===R&&Math.abs(o.z-g.dist)<10);return{lane:S.age>1.2&&!aheadR?R:S.L,h:false}}});   /* RH8c: the tailgater is in the lane you are in; move right (left from the right lane) and let it pass */
 regKind('follow',{zpre:null,dec:8,sp(){return 75},
- init(S){const g=G;S.fire=S.v==='fire';needLane();S.L=g.road===3?1:g.lane;S.c=addCar({lane:S.L,z:S.az+(S.fire?65:0),v0:g.cruise*(S.fire?.78:.72),keep:true,draw:S.fire?c=>{ambu(false,G.t);rc(-1.15,.42,2.3,.6,'#d62828')}:null});S.set=null;S.ciRule=S.fire?RULE.fire300:RULE.gap3s;S.close=0;S.noOnc=false},
+ init(S){const g=G;S.fire=S.v==='fire';needLane();S.L=g.road===3?1:g.lane;S.c=addCar({lane:S.L,z:S.az+(S.fire?50:0),v0:g.cruise*(S.fire?(window.__fireV||.72):.72),keep:true,draw:S.fire?c=>fireTruck(G.t):null});   /* RH8d: a fire engine (red, ladder), 125 m ahead at 72 percent of your cruise: it closes at 6 m/s, so you must brake to stay 300 ft (91 m) behind. v8c: an ambulance sprite, 140 m ahead at 78 percent. window.__fireV is the test mutant (a vehicle you never catch up with) */S.set=null;S.ciRule=S.fire?RULE.fire300:RULE.gap3s;S.close=0;S.noOnc=false},
  tgt(S,cr){return S.set!==null?Math.min(cr,S.set):cr},
  step(S){const g=G,c=S.c,nose=g.dist+NOSE,gapM=c.z-nose,gapS=gapM/Math.max(g.v,1);S.on=true;S.legit=false;S.gapS=gapS;S.gapM=gapM;
   if(g.braking)S.wasB=true;else if(S.wasB){S.wasB=false;S.set=g.v}
-  if(S.fire){if(S.age>1&&S.age%1.3<DT)snd('siren');if(gapM<91&&gapM>0){S.close+=DT;if(S.close>1.5&&!S.out)violate(S,{title:'FOLLOWED A FIRE TRUCK TOO CLOSELY',what:'You drove within 300 feet behind a fire truck with its siren on.',rule:RULE.fire300})}else S.close=0;
+  if(S.fire){if(S.age>1&&S.age%1.3<DT)snd('siren');if(gapM<91.44&&gapM>0){S.close+=DT;if(S.close>1.5&&!S.out)violate(S,{title:'FOLLOWED A FIRE TRUCK TOO CLOSELY',what:'You drove within 300 feet behind a fire truck with its siren on.',rule:RULE.fire300})}else S.close=0;
    if(S.age>14&&!S.out){c.lane=2;c.x=2*LN;c.out=true;S.out='ok'}return}
   if(!S.braked&&S.age>8){S.braked=true;c.brk=true;c.v0=c.v*.35;if(gapS<2.6&&!S.out)violate(S,{title:'FOLLOWED TOO CLOSELY',what:'The car ahead braked hard and you were only '+gapS.toFixed(1)+' s behind it.',rule:RULE.gap3s})}
   if(S.braked&&S.age>10){c.brk=false;c.v0=g.cruise*.72}
   if(S.age>13&&!S.out){c.out=true;S.out='ok'}},
- over(S,g){if(S.out||S.gapM===undefined||S.gapM>160)return;const s=S.fire?Math.round(S.gapM/FT)+' ft (300 ft or more)':S.gapS.toFixed(1)+' s (3 s or more)',ok=S.fire?S.gapM>=91:S.gapS>=3;
-  cx.save();RR(70,150,250,40,12);cx.fillStyle='rgba(8,14,32,.85)';cx.fill();cx.lineWidth=2;cx.strokeStyle=ok?'#35e08a':'#ff9a8a';cx.stroke();T((S.fire?'Fire truck: ':'Gap: ')+s,CX,170,16,ok?'#7dffb0':'#ffb0a0','center');cx.restore()},
+ over(S,g){if(S.out||S.gapM===undefined||S.gapM>160)return;const s=S.fire?Math.round(S.gapM/FT)+' ft (300 ft or more)':S.gapS.toFixed(1)+' s (3 s or more)',ok=S.fire?S.gapM>=91.44:S.gapS>=3;
+  cx.save();RR(40,150,310,40,12);cx.fillStyle='rgba(8,14,32,.85)';cx.fill();cx.lineWidth=2;cx.strokeStyle=ok?'#35e08a':'#ff9a8a';cx.stroke();T((S.fire?'Fire truck: ':'Gap: ')+s,CX,170,16,ok?'#7dffb0':'#ffb0a0','center');cx.restore()},
  oracle(S,g,m){if(m==='tk')return{h:false};if(S.fire)return{h:S.gapM<125};if(S.braked&&S.c.brk)return{h:S.gapM<30};return{h:S.gapS<3.4}}});
 regKind('moto',{zpre:null,sp(){return 70},
  init(S){const g=G;divSeg(S,g.dist-10,S.az+300);needLane();S.L=g.lane;S.ML=S.L>0?S.L-1:1;S.slow=addCar({lane:S.L,z:S.az-20,v0:g.cruise*.7,keep:true});S.m=null;S.ciRule=RULE.moto},
@@ -2155,11 +2162,11 @@ function train(len){for(let i=0;i<len;i++){rc(-1.6+i*3.4-0,0,3.2,2.6,i?'#4a5a6a'
 function crossbuck(lights,on){rc(-.08,0,.16,3.2,'#ddd');cx.save();cx.translate(0,-3.4);cx.rotate(.6);cx.fillStyle='#fff';cx.fillRect(-1,-.15,2,.3);cx.rotate(-1.2);cx.fillRect(-1,-.15,2,.3);cx.restore();
  if(lights){rc(-.8,2.2,1.6,.2,'#222');ci(-.6,2.3,.25,on?'#ff2020':'#4a1a1a');ci(.6,2.3,.25,!on?'#ff2020':'#4a1a1a')}}
 regKind('rail',{zpre:50,
- init(S){S.zr=S.az;S.zL=S.az-6.5;S.endZ=S.az+8;addGap(S.az-3,S.az+3);S.stopT=0;S.tr={x:-60,go:false,pass:false};S.set=null;S.ciRule=S.v==='lights'?RULE.railL:S.v==='blind'?RULE.railB15:RULE.railX;S.lights=S.v==='lights'},
+ init(S){S.zr=S.az;S.zL=S.az-6.5;S.endZ=S.az+8;addGap(S.az-3,S.az+3);S.stopT=0;S.tr={x:-60,go:false,pass:false};S.set=null;S.ciRule=S.v==='lights'?RULE.railL:S.v==='blind'?RULE.railB15:RULE.railX;S.lights=S.v==='lights';if(S.v==='blind')lsgZone(S.zr-40,15,null,'#fff',false,S.zr+8)},
  tgt(S,cr){if(S.v!=='blind')return cr;return S.set!==null?Math.min(cr,S.set):cr},
  step(S){const g=G,nose=g.dist+NOSE,dr=S.zr-nose,t=S.tr;S.on=true;
-  if(S.v==='blind'){S.legit=false;if(g.braking)S.wasB=true;else if(S.wasB){S.wasB=false;S.set=Math.max(3,g.v)}if(nose>S.zr-30&&nose<S.zr+5)g.limit=15;
-   if(!S.cr&&dr<0){S.cr=true;g.limit=0;const mph=Math.round(g.v*MPH);if(mph>16&&!S.out)violate(S,{title:'TOO FAST AT A BLIND RAILROAD CROSSING',what:'You crossed at '+mph+' mph where you could not see the tracks clearly.',rule:RULE.railB15})}
+  if(S.v==='blind'){S.legit=false;if(g.braking)S.wasB=true;else if(S.wasB){S.wasB=false;S.set=Math.max(3,g.v)}   /* RH8d: the 15 mph on the HUD comes from the RR XING 15 MPH sign (rh8d.js sign list), not from this step */
+   if(!S.cr&&dr<0){S.cr=true;const mph=Math.round(g.v*MPH);if(mph>16&&!S.out)violate(S,{title:'TOO FAST AT A BLIND RAILROAD CROSSING',what:'You crossed at '+mph+' mph where you could not see the tracks clearly.',rule:RULE.railB15})}
    if(g.dist>S.endZ&&!S.out)S.out='ok';return}
   if(!t.go&&dr<(S.v==='lights'?75:60)){t.go=true;const tH=Math.max(1.5,dr/Math.max(g.v,6));t.x=-14*tH-6}
   if(t.go&&!t.pass){t.x+=14*DT;if(t.x>30)t.pass=true}
@@ -2232,7 +2239,7 @@ regKind('trouble',{zpre:null,sp(){return 60},
   if(g.carX>2.2&&g.v<.3){S.stopT+=DT;if(S.stopT>1&&!S.done){S.done=true;const onCurve=nose>S.ca&&g.dist<S.cb;
     if(!g.haz&&!S.out)violate(S,{title:'NO HAZARD LIGHTS',what:'You stopped on the shoulder without your emergency flashers.',rule:RULE.trouble});
     else if(onCurve&&!S.out)violate(S,{title:'STOPPED ON A CURVE',what:'You stopped on the shoulder in a curve where others cannot see you.',rule:RULE.trouble});
-    else if(!S.out){S.out='ok';cueGo();g.haz=false;g.pullGrace=8;g.measure={t:0,ok:true,ft:null,head:'Safe',sub:'Tap the middle lane to pull back onto the road.'}}}}else S.stopT=0;   /* RH8c: v6b moved the car to lane 1 here (g.lane=1) */
+    else if(!S.out){S.out='ok';cueGo();g.pullGrace=8;   /* RH8d: the hazards stay on until you drive again, then "HAZARDS ON: tap to turn off" for 3 s (rh8d.js stepHaz) */g.measure={t:0,ok:true,ft:null,head:'Safe',sub:'Tap the middle lane to pull back onto the road.'}}}}else S.stopT=0;   /* RH8c: v6b moved the car to lane 1 here (g.lane=1) */
   if(nose>S.cb+120&&!S.out)S.out='miss'},
  missMsg:'Your car needed help: hazards on, pull onto the shoulder, stop.',
  ground(S,d){const a=S.ca-d,b=S.cb-d;gq(4.9,5.05,a,b,'#ffb020')},
@@ -2426,7 +2433,7 @@ const ADS=[['Your driving school here','Lessons that stick. (fake sponsor)'],['A
 function startAd(after){const g=G;g.ad={t:0,after,spon:ADS[g.adN++%ADS.length]};g.phase='ad';g.S=null;lowMusic(true);if(DEV)window.__adStart={after,runT:g.runT}}
 function endAd(){const g=G,ad=g.ad;if(DEV)(window.__adLog=window.__adLog||[]).push({after:ad.after,sec:+ad.t.toFixed(2)});g.ad=null;lowMusic(false);
  if(ad.after==='cp'){g.cpCoins=g.coins;PROG.coins=g.coins;PROG.stage=g.stage+1;saveProg();g.mode='run';startStage(g.stage+1,false,false);snd('tick')}
- else{g.lives=1;g.extraUsed=true;g.mode='run';g.result=null;if(g.lastCrashSit)g.queue.unshift(g.lastCrashSit);g.scenes=[];g.gaps=[];g.S=null;g.cur=null;g.phase='drive';clearWorld();setGap(2);g.v=0;musicOn();
+ else{g.lives=1;g.extraUsed=true;g.mode='run';g.result=null;if(g.lastCrashSit)g.queue.unshift(g.lastCrashSit);g.scenes=[];g.gaps=[];g.S=null;g.cur=null;g.phase='drive';clearWorld();lsgReset();g.haz=false;g.hazT=0;setGap(2);g.v=0;musicOn();   /* RH8d: the zone signs of the lost try are gone with its scene */
   g.banner={t:0,l1:'EXTRA LIFE',l2:'You keep going from here',l3:'One heart left'};snd('heal')}}
 /* ---------- the end: out of lives (back to the checkpoint) and the win ---------- */
 function endLives(){const g=G;g.coins=Math.max(0,Math.min(g.coins,g.cpCoins+C_CRASH));g.mode='end';g.endT=0;g.result={win:false};g.phase='over';lowMusic(false);if(AE)AE.stop(1.2);snd('fail');g.shake=.5}
@@ -2480,12 +2487,13 @@ function stepOne(){const g=G;g.t+=DT;
   case'crash':vT=stepCrash();break;
   case'cp':{const c=g.cp;g.pt+=DT;vT=3;g.dec=10;if(c.st===0&&g.pt>=.8)startRound();else if(c.st===3){vT=0;g.dec=30;if(g.rapid)g.rapid.update(DT*1000)}else if(c.st===1){vT=0;g.dec=30;stepCQ()}break}
   case'ad':g.ad.t+=DT;vT=0;g.dec=30;if(g.ad.t>=AD_SEC)endAd();break}
+ if((g.phase==='drive'||g.phase==='sit')&&g.lsg&&!window.__noLimCap)vT=Math.min(vT,limCap());   /* RH8d: the car never speeds up by itself past the posted road limit (the pass kinds ask for cruise + 3 m/s) */
  g.v+=clamp(vT-g.v,-g.dec*DT,ACC*DT);
  if(g.v<.01&&vT===0&&g.v>-.01)g.v=0;
  g.dist+=g.v*DT;
  const tx=g.xo!==null?g.xo:(g.lane-1)*LN,dx=tx-g.carX;g.carX+=dx*(1-Math.exp(-DT*(g.xo!==null?3.5:15)));g.tilt=lerp(g.tilt,clamp(dx*.14,-.22,.22),.3);g.spin*=.93;
  if(g.phase==='ticket'||g.phase==='crash'||g.phase==='sit'||g.phase==='drive'||g.phase==='turn'){for(const S of g.scenes){if((S!==g.S||g.phase==='crash'||g.phase==='ticket')&&K[S.k]&&K[S.k].bg)K[S.k].bg(S)}}
- stepCam();stepPickups();stepTraffic();genWeave();genTraffic();stepWeave();genOnc();   /* v7: genWeave (weave.js) replaces genPickups: obstacle rows with coins in the open lane */stepParked();stepLaneRules();stepDash();stepWeather();
+ stepLimit();stepHaz();stepCam();stepPickups();stepTraffic();genWeave();genTraffic();stepWeave();genOnc();   /* v7: genWeave (weave.js) replaces genPickups: obstacle rows with coins in the open lane */stepParked();stepLaneRules();stepDash();stepWeather();
  updScenes();updFx();if(g.phase!=='turn')updIdle()}
 /* ---------- share text, input ---------- */
 function shareText(){const g=G,sq={g:'\u{1F7E9}',y:'\u{1F7E8}',r:'\u{1F7E5}'},rows=[];
@@ -2688,11 +2696,15 @@ function wvObjs(){const g=G,V=Math.max(8,g.cruise),o=[];for(const c of g.tr){if(
   o.push({lane:c.lane,z:c.z,u,len:c.len||4.4,tEnd})}
  return o}
 /* the largest number of lanes (1 to 3) that one 12 m window can touch, over the next WV_HOR seconds, for the objects objs; dist0 = where the car is now */
-function wvWallOf(objs,dist0){let worst=0;for(let t=0;t<=WV_HOR;t+=WV_DT){const L=[[],[],[]];for(const o of objs){if(t>o.tEnd||o.lane<0||o.lane>2)continue;const s=o.z+o.u*t,e=s+o.len;if(e<dist0-2)continue;L[o.lane].push([s,e])}
+function wvWallOf(objs,dist0,hor){let worst=0;hor=hor||WV_HOR;for(let t=0;t<=hor;t+=WV_DT){const L=[[],[],[]];for(const o of objs){if(t>o.tEnd||o.lane<0||o.lane>2)continue;const s=o.z+o.u*t,e=s+o.len;if(e<dist0-2)continue;L[o.lane].push([s,e])}
   const n=(L[0].length?1:0)+(L[1].length?1:0)+(L[2].length?1:0);if(n<3){worst=Math.max(worst,n);continue}
   for(const a of L[0])for(const b of L[1])for(const c of L[2]){if(Math.max(a[0],b[0],c[0])-Math.min(a[1],b[1],c[1])<WV_WIN)return 3}
   worst=Math.max(worst,2)}return worst}
-function wvWallFree(add){return wvWallOf(wvObjs().concat(add),G.dist)<3}   /* (a function declaration: the test mutant switches it off from outside) */
+/* RH8d2 (the fair-gap edge of v7c, stage 1 seed 104 / 102): the check at one frame looks WV_HOR (22 s) ahead, but the frames that come later look 22 s ahead of THEIR time. A row is placed up to 150 m ahead, so it
+   stays in view up to 150 / cruise seconds; a wall that forms later than 22 s after the placement (a cyclist at 4.5 m/s needs 25 s to reach a row 118 m ahead) was not seen at the placement and
+   appeared in the check some seconds on. The placement therefore looks WV_HOR + (150 m / cruise) ahead: every later frame, while the row is still ahead, sees nothing that the placement had not seen. */
+function wvHorPlace(){return WV_HOR+150/Math.max(8,G.cruise)}   /* (a function declaration: the test mutant puts the old 22 s back from outside) */
+function wvWallFree(add){return wvWallOf(wvObjs().concat(add),G.dist,wvHorPlace())<3}   /* (a function declaration: the test mutant switches it off from outside) */
 function addOb(type,lane,z,v0,o){const d=OBD[type],c=addCar(Object.assign({lane,z,v0:v0||0,big:type==='truck'||type==='dpark'?1:0},o||{}));c.ob=type;c.len=d.len;c.hw=d.hw;if(type==='bike')c.x+=.55;c.draw=OBDRAW[type];
  if(DEV)(window.__obLog=window.__obLog||[]).push({id:c.id,ob:type,lane,z:+z.toFixed(1),v0:+(v0||0).toFixed(1),rel:+(z-G.dist).toFixed(1),stage:G.stage,road:G.road});return c}
 function wvCoins(lane,z){const g=G;for(const dz of[-3.2,0,3.2]){g.pk.push({z:z+dz,x:(lane-1)*LN,ph:rnd()*6,dbg:DEV?{ph:g.phase,lim:g.wv.limNow,k:wvNextK(),sitN:g.sitN,spawnAt:+g.spawnAt.toFixed(1),dist:+g.dist.toFixed(1),t:+g.runT.toFixed(1)}:0});if(DEV)(window.__pkLog=window.__pkLog||[]).push(+(z+dz).toFixed(1))}}
@@ -2714,7 +2726,7 @@ function genWeave(){const g=G;if(g.noWorld||g.mode!=='run'||g.pend)return;if(!g.
  else if(wlim!==undefined&&wlim!==null){if(w.z<g.dist+lead)w.z=g.dist+lead;lim=wlim}
  else if(g.phase==='sit'&&g.S&&g.cur&&WV_SIT[g.S.k]&&g.cur.pi===g.cur.sit.parts.length-1&&!g.S.out){const S=g.S,a=S.az+ZPOST+14;if(w.z<a)w.z=a;if(w.z<g.dist+lead)w.z=g.dist+lead;lim=wvLim(S.az+lvGap(g.stage)*v-4)}
  else return;
- w.limNow=+lim.toFixed(1);for(let guard=0;guard<4&&w.z<=lim&&w.z<g.dist+150;guard++){const z=placeRow(w.z,lim);w.n++;w.lastZ=z;w.z=z+wvT(g.stage)*v*(.9+rnd()*.25)}}
+ w.limNow=+lim.toFixed(1);for(let guard=0;guard<4&&w.z<=lim&&w.z<g.dist+150;guard++){const z=placeRow(w.z,lim);w.n++;w.lastZ=z;const a=z;w.z=z+wvT(g.stage)*v*(.9+rnd()*.25);if(w.n>1)wvLine(a,w.z,lim)}}
 function placeRow(z,lim){const g=G,w=g.wv,ok=l=>[z-25,z,z+12].every(q=>roleAt(l,q)==='my');g.noWvSeg=true;const my=[0,1,2].filter(ok);g.noWvSeg=false;   /* the roles of the road itself (a pocket of the row before does not count) */
  if(my.length===1&&my[0]===1&&g.road===2){const rz=pocketZ(z,lim);if(rz!==null)z=rz}   /* the two-way street: a swerve pocket sits on a red-curb stretch (no parked cars there to pop away) */
  const row={z:+z.toFixed(1),lanes:[],types:[],pocket:false,road:g.road,stage:g.stage,spawnAt:+g.spawnAt.toFixed(1)};
@@ -2729,6 +2741,7 @@ function wvMover(type,lane,z,row){const g=G,V=Math.max(8,g.cruise),u=type==='bik
  if(z0<g.dist+Math.max(34,4.4+3.2*(V-u))||z>g.spawnAt-24)return null;   /* 3 s or more of closing time from where it appears */
  if(g.tr.some(c=>!c.onc&&!c.out&&c.lane===lane&&c.z>z0-12&&c.z<z+40))return null;   /* its lane is free ahead of it (rows are placed in order: nothing lies beyond z yet, and later rows keep out of its lane) */
  if(!wvWallFree([{lane,z:z0,u,len:OBD[type].len,tEnd:1e9}]))return null;   /* RH7c: and on its whole way (22 s) it never makes 3 lanes with the rows and cars ahead (v7b only forbade a two-lane row near it) */
+ g.pk=g.pk.filter(p=>!(p.line&&Math.abs(p.x-(lane-1)*LN)<.5&&p.z>z0-6&&p.z<z+12));   /* RH8d (critic round 2): a coin line never lies on the path of a moving car placed later */
  const c=addOb(type,lane,z0,u,row.road===2||row.road===3?{}:{});row.lanes.push(lane);row.types.push(type);row.mover=true;return c}
 function row3(row,z){const g=G,st=g.stage,w=g.wv,M=wvMoverLanes();
  const movers=g.tr.filter(c=>c.ob&&c.v0>0&&!c.out&&c.z>g.dist-6).length,maxM=st<=3?1:2;
@@ -2747,8 +2760,10 @@ function row3(row,z){const g=G,st=g.stage,w=g.wv,M=wvMoverLanes();
 /* the lane you will be in when you reach depth z: start from your lane; at each row ahead whose obstacle blocks it, you move to that row's coin lane
    (or the nearest open lane). A player who keeps a lane until something is in it ends up here. */
 function wvPredict(z){const g=G;let L=g.lane;for(const r of g.wv.rows){if(r.z<=g.dist||r.z>=z)continue;if(r.lanes.includes(L)){if(r.coins!==undefined&&!r.lanes.includes(r.coins))L=r.coins;else{const f=[0,1,2].filter(l=>!r.lanes.includes(l)).sort((a,b)=>Math.abs(a-L)-Math.abs(b-L));if(f.length)L=f[0]}}}return L}
+/* RH8d (Kyle 10-13: "it feels weird that obstacles always come with coins"): the open lane of a row holds coins only WV_COINP of the time; coin lines on stretches without an obstacle (wvLine) make up the rest */
+var WV_COINP=.4,WV_LINEP=.5;   /* (var: the test mutants assign them) */
 function wvFreeCoins(row,z,B){const g=G,w=g.wv,M=wvMoverLanes(),free=[0,1,2].filter(l=>!B.includes(l)&&!M.has(l));
- if(!free.length){w.lastFree=undefined;return}
+ if(!free.length||rnd()>=WV_COINP){w.lastFree=undefined;return}
  const near=free.slice().sort((a,b)=>Math.min(...B.map(x=>Math.abs(x-a)))-Math.min(...B.map(x=>Math.abs(x-b))))[0];   /* coins in the open lane next to the obstacle: you have to move to get them */
  wvCoins(near,z);row.coins=near;w.lastFree=near}
 /* a two-way road: your lane is blocked; a pocket opens on the right (the parking lane or the shoulder), or a slow car turns off once you are close behind it */
@@ -2758,7 +2773,15 @@ function row1(row,z){const g=G,ok=[z-42,z-30,z-20,z-6,z,z+8].every(q=>{const r=r
  if(!ok)return;
  const ty=pickW(STATIC_W[g.road]||STATIC_W[2]),d=OBD[ty];addOb(ty,1,z,0);row.lanes.push(1);row.types.push(ty);row.pocket=true;
  g.wvSeg.push({a:z-30,b:z+d.len+4,roles:[roleAt(0,z),'my','my'],pf:[z-42,z+12],obZ:z,obLen:d.len});   /* RH8c: the car is no longer moved out of the pocket. On the two-way street the red-curb stretch is the lane (laneDrv) and it ends where parking begins; on the highway the pocket is short (about 1.5 s) and chains with the next one when rows are close: a player who stays in it past its end gets the shoulder ticket after 1.2 s (the normal obstacle outcome). (A longer pocket made a permanent extra lane on the highway: tried, reverted.) */   /* the pocket opens 30 m before the obstacle; the red curb (no parked cars) starts 12 m earlier, so a player who moves over at the pocket start is never beside a parked car */if(g.wvSeg.length>12)g.wvSeg.shift();
- wvCoins(2,z);row.coins=2}
+ if(rnd()<WV_COINP){wvCoins(2,z);row.coins=2}}
+/* RH8d: a coin line (3 to 5 coins) between two rows, in a lane with no obstacle, no mover and no other row near it; with 60 percent it is NOT the lane you will be in (so it takes a lane change to reach).
+   It stays 4 m or more inside the row limit (the judge zone of the next situation starts at least 8 m past it), so coins never lie in a judge zone. */
+function wvLine(a,b,lim){const g=G;if(b-a<28||rnd()>=WV_LINEP)return;
+ const n=3+((rnd()*3)|0),len=(n-1)*3.2;if(b-a<len+20)return;const z0=a+(b-a-len)/2,after=b-(z0+len);if(after<Math.max(10,.6*Math.max(8,g.cruise)))return;   /* 0.6 s or more between the last coin and the next row (critic round 2 asked 1.3 s: that removed every line in the final full run, 0 lines; rows are 1.5 to 2.4 s apart) */if(z0<g.dist+30||z0+len>lim-4||z0+len>g.spawnAt-12)return;
+ const M=wvMoverLanes(),ok=l=>!M.has(l)&&[z0,z0+len/2,z0+len].every(q=>roleAt(l,q)==='my')&&!g.tr.some(c=>!c.out&&!c.onc&&c.lane===l&&c.z<z0+len+4&&c.z+(c.len||4.4)>z0-4);
+ const cand=[0,1,2].filter(ok);if(!cand.length)return;const pred=wvPredict(z0),off=cand.filter(l=>l!==pred),lane=off.length&&rnd()<.6?off[(rnd()*off.length)|0]:cand[(rnd()*cand.length)|0];
+ for(let i=0;i<n;i++){g.pk.push({z:z0+i*3.2,x:(lane-1)*LN,ph:rnd()*6,dbg:0,line:1});if(DEV)(window.__pkLog=window.__pkLog||[]).push(+(z0+i*3.2).toFixed(1))}
+ if(DEV)(window.__lineLog=window.__lineLog||[]).push({z:+z0.toFixed(1),lane,n,pred,stage:g.stage,road:g.road,away:lane!==pred})}
 /* RH8c (Kyle 10-13): the car never changes lane by itself. v7b had three automatic moves here, all removed: (1) g.wantMid (a situation start moved you to lane 1), (2) the pocket merge-back
    (the car left the pocket lane once the obstacle was behind it), (3) wvLaneEnds (a lane that turned into parking or shoulder moved you to lane 1). A lane that ends is an obstacle like any
    other: laneEndAhead / drawLaneEndsGround / laneEndsProps show a LANE ENDS sign and merge arrows 3 s ahead, then the parked car or the curb end is the normal outcome of staying in it. */
@@ -2770,9 +2793,9 @@ function laneEndAhead(L,span){const g=G,n=g.dist+NOSE;if(g.mode!=='run'||(g.phas
  if(!laneDrv(L,n))return null;for(let d=4;d<=span;d+=3)if(!laneDrv(L,n+d))return n+d;return null}
 /* a yellow LANE ENDS sign at the roadside (3.5 s before the end, never closer than 8 m) and two white merge arrows on the lane (3.0 s and 1.8 s before the end), drawn while the lane you are in ends within 6 s */
 const LE_SPAN=v=>v*6+14;
-function drawLaneEndsGround(d){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=L===0?null:laneEndAhead(L,LE_SPAN(v));if(e===null)return;
- const x=(L-1)*LN,z=e-d;for(const k of[0,1]){const zz=z-v*(3.0-k*1.2);if(zz<ZN+2)continue;at(x,zz,()=>{cx.save();cx.scale(1,.34);cx.fillStyle='rgba(255,255,255,.85)';cx.beginPath();cx.moveTo(0,1.6);cx.lineTo(0,-1.2);cx.lineTo(-1.3,-1.2);cx.lineTo(-1.3,-2);cx.lineTo(-2.7,-.2);cx.lineTo(-1.3,1.6);cx.lineTo(-1.3,.8);cx.lineTo(0,.8);cx.fill();cx.restore()})}}
-function laneEndsProps(dl){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=L===0?null:laneEndAhead(L,LE_SPAN(v));if(e===null)return;const z=e-v*3.5-g.dist;if(z<8)return;   /* a pocket shorter than 3.5 s has no sign: the arrows and the end of the lane are what you see */
+function drawLaneEndsGround(d){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=laneEndAhead(L,LE_SPAN(v));if(e===null)return;   /* RH8d: lane 0 too (a divided stretch ends and its left lane becomes the oncoming lane: the arrows point right) */
+ const x=(L-1)*LN,z=e-d;for(const k of[0,1]){const zz=z-v*(3.0-k*1.2);if(zz<ZN+2)continue;at(x,zz,()=>{cx.save();cx.scale(L===0?-1:1,.34);cx.fillStyle='rgba(255,255,255,.85)';cx.beginPath();cx.moveTo(0,1.6);cx.lineTo(0,-1.2);cx.lineTo(-1.3,-1.2);cx.lineTo(-1.3,-2);cx.lineTo(-2.7,-.2);cx.lineTo(-1.3,1.6);cx.lineTo(-1.3,.8);cx.lineTo(0,.8);cx.fill();cx.restore()})}}
+function laneEndsProps(dl){const g=G,L=g.lane,v=Math.max(10,g.v,g.cruise*.8),e=laneEndAhead(L,LE_SPAN(v));if(e===null)return;const z=e-v*3.5-g.dist;if(z<8)return;   /* a pocket shorter than 3.5 s has no sign: the arrows and the end of the lane are what you see */
  P(dl,5.9,z,()=>plainBoard(['LANE','ENDS'],'#f2c200','#111'),1,0,1.5)}
 /* a roadside board of this card (LANE ENDS, 100 FT): the same shape as drawSignBoard, but not a handbook sign, so it is not part of the real-sign list (signs_real.js) */
 function plainBoard(lines,bg,fg){const n=lines.length,h=.36*n+.3,y0=2.3,w=1.5;rc(-.06,0,.12,y0,'#8a8f98');rc(-w/2,y0,w,h,'#111');rc(-w/2+.06,y0+.06,w-.12,h-.12,bg);
@@ -2798,6 +2821,49 @@ function dparkD(c){truckRear(c);if(Math.floor(G.t*4)%2){ci(-1.2,1.1,.3,'#ffb300'
 function bikeD(c){cx.scale(1.3,1.3);bike(c.age)}
 function slowD(c){carRear(c.col,c.v<c.v0-.5||c.brk,false);if(c.blink&&Math.floor(G.t*3)%2)ci(c.blink<0?-.78:.78,.68,.24,'#ffb300')}
 const OBDRAW={pothole:potholeD,cone:coneRowD,debris:debrisD,stalled:stalledD,dpark:dparkD,bike:bikeD,slow:slowD,truck:c=>truckRear(c)};
+/* ---------- RH8d (Kyle 10-13, stage 7): speed you can trust, hazards, the fire truck ----------
+ Kyle: "Need to teach the user that they have to check their speed" / "After a 15mph zone the speed limit didn't reset and stayed at 15" / "Hazards stayed on after the situation".
+ 1. The HUD limit is ALWAYS the limit of the last road sign the car has passed. Every road type has a posted free-road limit (ROAD_LIM, the road names say 55 and 65 already);
+    a speed zone puts a sign at its start and a sign at its end (the next limit). g.limit is set in one place only (stepLimit): no exit path of any situation can leave it stuck.
+    v8c: sit_speed.js reset g.limit only in `if(nose>S.oz+25&&!S.out)`; a ticket inside the zone sets S.out first, so the 45 of a work zone stayed beside a road sign of 55.
+ 2. The car never speeds up by itself above the posted road limit: ROAD_LIM is at or above the highest cruise of the road (road 1: 20 m/s = 45 mph; road 2: 21.5 = 48; road 3: 24.4 = 54.6;
+    road 4: 28.6 = 64), and a cap in stepOne covers the +3 m/s of the pass kinds. A zone that is LOWER than the road limit still pushes the car to its limit + 8 mph after its sign
+    (the player must brake, as before); a zone at the road limit (55 on the highway, 65 on the freeway) has no push.
+ 3. Hazard lights: when the situation that needed them is over and the car drives again, the HUD shows "HAZARDS ON: tap to turn off" for 3 s, then they switch off by themselves (stepHaz).
+ Built from: the way racing games (Mario Kart, Burnout) keep a HUD value bound to the last placed sign / checkpoint object instead of to the state of one scene; the California Driver Handbook
+ ("Speed limits", "Basic speed law", "Emergency vehicles: stay at least 300 feet behind"). */
+/* RH8d2 (Lead decision 10-17): the posted limits are real: one-way city street 35, two-way city street 40, highway 55, freeway 65 (the study slice teaches 25 in residential and school zones, so the
+   normal street limit must not be 45 or 50). The cruise is the road's own speed and never above its limit (ROAD_CAP, m/s: 15.5 = 34.7 mph, 17.7 = 39.6, 24.4 = 54.6, 28.6 = 64.0); the stage
+   speed rise comes from the road type (lvSpeed is kept for the spawn distances and the oncoming cars; cruiseNow caps it by road), never from speeding. */
+const ROAD_LIM=[0,35,40,55,65];   /* posted free-road limit (mph) by road type: one-way street, two-way street, highway, freeway */
+const ROAD_CAP=[0,15.5,17.7,24.4,28.6];   /* the cruise ceiling (m/s) by road type: each one rounds to its posted limit or just under it */
+const roadLim=()=>ROAD_LIM[G.road]||ROAD_LIM[1];
+const limBoard=l=>['SPEED','LIMIT',String(l)];
+/* the list of speed signs on the road, in absolute metres: {z, lim, adv (an advisory safe speed), board (lines of the sign, or null = another prop draws it), bg} */
+function lsgReset(){const g=G,L=roadLim();g.lsg=[{z:g.dist-5,lim:L,adv:false,board:null},{z:g.dist+30,lim:L,adv:false,board:limBoard(L),bg:'#fff',rep:true}];g.fogZ=null;g.fog=0;g.limit=L;g.limitAdv=false}   /* the start of a road: the HUD shows its posted limit, a repeat sign stands 30 m ahead (a zone sign that comes before it takes it away: lsgAdd) */
+function lsgAdd(z,lim,board,bg,adv,end){const g=G;if(!g.lsg)lsgReset();g.lsg=g.lsg.filter(e=>!(e.rep&&e.z>z-40)&&!(!end&&e.end&&e.z>z));   /* a new zone sign cancels the end sign of an earlier zone that lies beyond it (a zone whose situation ended early, by a ticket for something else, must not give the road limit back in the middle of the next zone) */
+ g.lsg.push({z,lim,adv:!!adv,board,bg:bg||'#fff',end:!!end});g.lsg.sort((a,b)=>a.z-b.z)}
+/* a zone or crossing with its own limit: the sign at z0, the next limit (the road limit) at z1 */
+function lsgZone(z0,lim,board,bg,adv,z1){lsgAdd(z0,lim,board,bg,adv,false);lsgAdd(z1,roadLim(),limBoard(roadLim()),'#fff',false,true)}
+function stepLimit(){const g=G;if(!g.lsg||g.mode!=='run')return;const n=g.dist+NOSE;let cur=null;for(const e of g.lsg){if(e.z<=n)cur=e;else break}
+ if(cur){g.limit=cur.lim;g.limitAdv=cur.adv;const i=g.lsg.indexOf(cur);if(i>1)g.lsg.splice(0,i-1)}   /* keep the last passed sign and the ones ahead */
+ if(g.fogZ){const a=g.fogZ[0],b=g.fogZ[1];if(n>b){g.fog=0;g.fogZ=null}else g.fog=clamp((n-a)/60,0,1)}}
+function drawLimitSigns(dl){const g=G;if(!g.lsg||g.mode!=='run')return;for(const e of g.lsg){if(!e.board)continue;const rz=e.z-g.dist;if(rz<-8||rz>260)continue;P(dl,5.5,rz,()=>drawSignBoard(e.board,e.bg,'#111'),1,0,1.9)}}
+/* the car never picks up speed beyond the posted road limit (the pass kinds ask for cruise + 3 m/s) */
+const limCap=()=>{const g=G,S=g.S;let L=roadLim();if(g.phase==='sit'&&S&&S.k==='speed'&&S.V&&S.V.pre&&!S.out)L=Math.max(L,S.V.pre);return(L+.45)/MPH}   /* RH8d2: a speed zone that drops from a higher posted limit (V.pre) lets the traffic run at that limit until the player brakes */
+/* ---------- hazard lights ---------- */
+function stepHaz(){const g=G;g.hazRem=false;if(!g.haz){g.hazT=0;return}
+ const S=g.S;if(g.phase==='sit'&&S&&S.k==='trouble'&&!S.out){g.hazT=0;return}   /* the engine trouble that needs them is running */
+ if((g.phase==='drive'||g.phase==='sit')&&g.v>1.5){g.hazRem=true;g.hazT=(g.hazT||0)+DT;if(g.hazT>=3){g.haz=false;g.hazT=0;g.hazRem=false;if(DEV)(window.__hazLog=window.__hazLog||[]).push({t:+g.runT.toFixed(2),off:'auto'})}}}
+function drawHazRem(){const g=G;if(!g.hazRem||g.mode!=='run')return;cx.save();RR(48,H-124,294,34,12);cx.fillStyle='rgba(30,16,0,.9)';cx.fill();cx.lineWidth=2;cx.strokeStyle='#ffb020';cx.stroke();T('HAZARDS ON: tap to turn off',CX,H-102,16,'#ffd27a','center');cx.restore()}   /* above the HAZARD button (the top of the screen holds the situation cards) */
+/* ---------- the fire truck (rear view): red body, white stripes, a ladder on the roof, a light bar ---------- */
+function fireTruck(t){rc(-1.2,0,.5,.55,'#111');rc(.7,0,.5,.55,'#111');
+ rc(-1.25,.45,2.5,2.45,'#d11a1a');rc(-1.25,.78,2.5,.13,'#f4f4f4');rc(-1.25,1.45,2.5,.13,'#f4f4f4');rc(-1.3,.3,2.6,.2,'#222');
+ for(let i=0;i<5;i++)rc(-1.0+i*.42,1.62,.3,1.0,'#a51212');   /* roll-up compartment doors */
+ rc(-1.1,3.0,2.2,.08,'#d7dbe0');rc(-1.1,3.32,2.2,.08,'#d7dbe0');for(let i=0;i<8;i++)rc(-1.04+i*.3,3.0,.06,.4,'#d7dbe0');   /* the ladder */
+ const f=Math.floor(t*6)%2;rc(-.9,2.9,.9,.1,f?'#ff2d2d':'#701818');rc(0,2.9,.9,.1,f?'#2d6bff':'#162a70');ci(f?-.45:.45,2.95,.8,f?'rgba(255,40,40,.3)':'rgba(40,100,255,.3)');
+ rc(-.95,.62,.35,.22,'#ffb300');rc(.6,.62,.35,.22,'#ffb300');
+ cx.save();cx.font='bold .3px '+FONT;cx.textAlign='center';cx.textBaseline='middle';cx.fillStyle='#fff';cx.fillText('FIRE',0,-1.1);cx.restore()}
 /* ---------- v6 checkpoint: banner, then a RAPID round or a STREAK round (they alternate: Kyle 10-11), then the 15 s placeholder ad (card RH6a) ----------
  RAPID (DESIGN.md v6 item 9): one category per round with a title, 30 s in total, items keep coming, coins per right answer, the misses are explained after (seg5_rapid.js, timed mode).
  STREAK (item 8): text questions from the core facts, bank text verbatim, NO timer, play until the first wrong answer (max 10); the n-th right answer in a row pays 25 x n coins; a wrong answer ends the round and explains the rule.
@@ -2867,7 +2933,7 @@ function drawWorld(){const g=G,d=g.dist;
 function polCar(t){const f=Math.floor(t*6)%2;rc(-1.05,0,.4,.45,'#111');rc(.65,0,.4,.45,'#111');rc(-1,.28,2,.72,'#1d2533');rc(-.82,.98,1.64,.55,'#1d2533');rc(-.7,1.02,1.4,.42,'#16202e');rc(-1,.28,2,.14,'#f4f4f4');
  rc(-.75,1.53,.7,.2,f?'#ff2d2d':'#701818');rc(.05,1.53,.7,.2,f?'#162a70':'#2d6bff');ci(f?-.4:.4,1.65,.9,f?'rgba(255,40,40,.3)':'rgba(40,100,255,.3)');rc(-.96,.58,.42,.2,'#b02a22');rc(.54,.58,.42,.2,'#b02a22')}
 let snapC=null;
-function drawScenes(dl){const g=G;for(const S of g.scenes){PA=Math.min(1,S.age/.4);if(S.k==='siren')PA=1;if(K[S.k].props)K[S.k].props(S,dl)}PA=1;laneEndsProps(dl);drawWorldItems(dl);
+function drawScenes(dl){const g=G;for(const S of g.scenes){PA=Math.min(1,S.age/.4);if(S.k==='siren')PA=1;if(K[S.k].props)K[S.k].props(S,dl)}PA=1;laneEndsProps(dl);drawLimitSigns(dl);drawWorldItems(dl);
  if(g.phase==='ticket'&&g.tk){const k=g.tk,z=lerp(-15,-7.4,ease(k.t/2.2));dl.push({z,f:()=>at0(g.carX-1.1,z,()=>{cx.scale(1.15,1.15);polCar(g.t)},1)})}}
 function drawPlayer(){const g=G,k=PX*1.15;cx.save();cx.translate(CX+g.carX*PX,GY);
  cx.fillStyle='rgba(0,0,0,.3)';cx.beginPath();cx.ellipse(0,4,1.4*k,.38*k,0,0,6.3);cx.fill();
@@ -3115,7 +3181,7 @@ function draw(al){const g=G,rd=g.dist,rx=g.carX;
  cx.restore();
  drawSiren();
  if(g.flash){cx.fillStyle=g.flash.col;cx.globalAlpha=clamp(g.flash.a,0,1)*.7;cx.fillRect(0,0,W,H);cx.globalAlpha=1}
- drawMirror();drawBlindSpot();drawHUD();if(g.mode==='run'&&g.phase!=='cp'&&g.phase!=='ad'){drawSpeedo();drawDash()}drawTask();drawFxText();drawToast();drawMeasure();drawTicket();drawCrash();drawCP();drawCQ();
+ drawMirror();drawBlindSpot();drawHUD();if(g.mode==='run'&&g.phase!=='cp'&&g.phase!=='ad'){drawSpeedo();drawDash()}drawTask();drawHazRem();drawFxText();drawToast();drawMeasure();drawTicket();drawCrash();drawCP();drawCQ();
  if(g.mode==='run'&&g.phase==='cp'&&g.cp&&g.cp.st===3&&g.rapid)g.rapid.draw();
  if(g.mode==='title')drawTitle();else if(g.mode==='end')drawEnd();
  if(g.mode==='run'&&g.phase==='ad')drawAd();
@@ -3202,8 +3268,8 @@ if(AUTO){let holding=false,swiped=null;const ev=(t,x,y)=>cv.dispatchEvent(new Po
   hold(!!a.h)};window.__hook=window.__autoHook}
 if(DEV){const sk=Q.get('sit');if(sk){const id=SITBY[sk]?sk:(SIT.find(s=>s.parts.some(p=>p.k===sk))||{}).id;if(id)setTimeout(()=>{window.__rush.forceSit(id,{world:true})},50)}
  const prevF=window.__rush.forceSit;
- Object.assign(window.__rush,{forceSit(id,o){prevF(id,o);const g=G,sit=SITBY[id];g.road=sit.road;g.cruise=cruiseNow();g.v=g.cruise;if(K[sit.parts[0].k].prep)K[sit.parts[0].k].prep(g,sit)},
-  wvWallOf,wvWallFree,wvObjs,ROADS,roleAt,rolesAt,clAt,passable,GP_MAND,GP_EXTRA,get SITM(){return SITM},get SITX(){return SITX},oracleAct,dashHit,dashPress,ctxBtn,sigFor,dashY,laneVio,roadOfStage,lvSpeed,
+ Object.assign(window.__rush,{forceSit(id,o){prevF(id,o);const g=G,sit=SITBY[id];g.road=sit.road;lsgReset();g.cruise=cruiseNow();g.v=g.cruise;if(K[sit.parts[0].k].prep)K[sit.parts[0].k].prep(g,sit)},
+  wvWallOf,wvWallFree,wvObjs,wvHorPlace,ROAD_LIM,ROAD_CAP,ROADS,roleAt,rolesAt,clAt,passable,GP_MAND,GP_EXTRA,get SITM(){return SITM},get SITX(){return SITX},oracleAct,dashHit,dashPress,ctxBtn,sigFor,dashY,laneVio,roadOfStage,lvSpeed,
 
   /* the paint along a lane line as drawn: one letter per sample from z0 to z1 metres ahead (y yellow, w white, - road) at lateral position xm (the road-line test) */
   roadNow(){return G.road},
